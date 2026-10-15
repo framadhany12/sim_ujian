@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+/* Tema Politeknik TEDC: biru navy (blue) + kuning (amber). Semua kelas blue-* / amber-* otomatis memakai palet ini. */
+@theme {
+  --color-page: #f4f5f9;
+  --color-line: #e7e9f0;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+
+  --color-blue-50: #eef4ff;
+  --color-blue-100: #dbe7ff;
+  --color-blue-200: #bcd2ff;
+  --color-blue-300: #8fb3ff;
+  --color-blue-400: #5c8cf5;
+  --color-blue-500: #2f64e0;
+  --color-blue-600: #1e4fc4;
+  --color-blue-700: #173f9e;
+  --color-blue-800: #14327a;
+  --color-blue-900: #0f2557;
+  --color-blue-950: #0a1a3f;
+
+  --color-amber-50: #fffbe6;
+  --color-amber-100: #fff3b8;
+  --color-amber-200: #ffe680;
+  --color-amber-300: #ffd84d;
+  --color-amber-400: #fcc419;
+  --color-amber-500: #f5b000;
+  --color-amber-600: #d99200;
+  --color-amber-700: #b06f00;
+  --color-amber-800: #8a5600;
+  --color-amber-900: #6e4500;
+}
+
+body { @apply bg-page text-slate-900 antialiased; font-family: var(--font-sans); }
+
+.hero-pattern {
+  background-image:
+    radial-gradient(circle at 15% 20%, rgb(252 196 25 / 0.18) 0, transparent 38%),
+    radial-gradient(circle at 90% 85%, rgb(47 100 224 / 0.45) 0, transparent 45%),
+    radial-gradient(rgb(255 255 255 / 0.07) 1.5px, transparent 1.5px),
+    linear-gradient(135deg, #0a1a3f 0%, #0f2557 55%, #173f9e 100%);
+  background-size: auto, auto, 22px 22px, auto;
+}

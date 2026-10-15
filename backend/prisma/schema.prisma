@@ -1,0 +1,206 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  peserta
+}
+
+enum UserStatus {
+  aktif
+  nonaktif
+}
+
+enum QuestionType {
+  pilihan_ganda
+  esai
+  benar_salah
+}
+
+enum AttemptStatus {
+  belum_mulai
+  sedang_mengerjakan
+  selesai
+}
+
+enum Kelulusan {
+  lulus
+  tidak_lulus
+  belum
+}
+
+model User {
+  id                 Int          @id @default(autoincrement())
+  username           String       @unique
+  passwordHash       String       @map("password_hash")
+  role               Role
+  mustChangePassword Boolean      @default(true) @map("must_change_password")
+  status             UserStatus   @default(aktif)
+  createdAt          DateTime     @default(now()) @map("created_at")
+  profile            PesertaProfile?
+  exams              Exam[]
+  attempts           ExamAttempt[]
+  graded             Answer[]
+
+  @@map("users")
+}
+
+model PesertaProfile {
+  id          Int     @id @default(autoincrement())
+  userId      Int     @unique @map("user_id")
+  groupId     Int?    @map("group_id")
+  namaLengkap String  @map("nama_lengkap")
+  email       String?
+  noHp        String? @map("no_hp")
+  asalSekolah String? @map("asal_sekolah")
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group       Group?  @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  @@map("peserta_profile")
+}
+
+model Exam {
+  id             Int           @id @default(autoincrement())
+  judul          String
+  petunjuk       String?       @db.Text
+  durasiMenit    Int           @map("durasi_menit")
+  aktif          Boolean       @default(true)
+  tampilkanHasil Boolean       @default(false) @map("tampilkan_hasil")
+  acakSoal       Boolean       @default(false) @map("acak_soal")
+  nilaiKelulusan Decimal       @default(60) @db.Decimal(6, 2) @map("nilai_kelulusan")
+  createdBy      Int           @map("created_by")
+  creator        User          @relation(fields: [createdBy], references: [id])
+  groups         ExamGroup[]
+  tokens         ExamToken[]
+  questions      ExamQuestion[]
+  attempts       ExamAttempt[]
+
+  @@map("exams")
+}
+
+model Question {
+  id            Int          @id @default(autoincrement())
+  tipe          QuestionType
+  teksSoal      String       @db.Text @map("teks_soal")
+  kunciJawaban  String?      @db.Text @map("kunci_jawaban")
+  bobot         Decimal      @default(1) @db.Decimal(6, 2)
+  acakOpsi      Boolean      @default(false) @map("acak_opsi")
+  pembahasan    String?      @db.Text
+  kategori      String?      @db.VarChar(80)
+  createdAt     DateTime     @default(now()) @map("created_at")
+  options       Option[]
+  answers       Answer[]
+  examLinks     ExamQuestion[]
+
+  @@map("questions")
+}
+
+model Option {
+  id         Int      @id @default(autoincrement())
+  questionId Int      @map("question_id")
+  label      String   @db.Char(1)
+  teksOpsi   String   @db.Text @map("teks_opsi")
+  isBenar    Boolean  @default(false) @map("is_benar")
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@map("options")
+}
+
+model ExamAttempt {
+  id               Int           @id @default(autoincrement())
+  examId           Int           @map("exam_id")
+  userId           Int           @map("user_id")
+  waktuMulai       DateTime?     @map("waktu_mulai")
+  waktuSelesai     DateTime?     @map("waktu_selesai")
+  status           AttemptStatus @default(belum_mulai)
+  skorTotal        Decimal?      @db.Decimal(8, 2) @map("skor_total")
+  statusKelulusan  Kelulusan     @default(belum) @map("status_kelulusan")
+  lastSeen         DateTime?     @map("last_seen")
+  exam             Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  answers          Answer[]
+  logs             ActivityLog[]
+
+  @@unique([examId, userId])
+  @@map("exam_attempts")
+}
+
+model Answer {
+  id         Int         @id @default(autoincrement())
+  attemptId  Int         @map("attempt_id")
+  questionId Int         @map("question_id")
+  jawaban    String?     @db.Text
+  isRagu     Boolean     @default(false) @map("is_ragu")
+  nilai      Decimal?    @db.Decimal(6, 2)
+  dinilaiOleh Int?       @map("dinilai_oleh")
+  attempt    ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question   Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  grader     User?       @relation(fields: [dinilaiOleh], references: [id])
+
+  @@unique([attemptId, questionId])
+  @@map("answers")
+}
+
+model ActivityLog {
+  id        Int         @id @default(autoincrement())
+  attemptId Int?        @map("attempt_id")
+  userId    Int?        @map("user_id")
+  event     String
+  detail    String?
+  timestamp DateTime    @default(now())
+  attempt   ExamAttempt? @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@map("activity_logs")
+}
+
+model Group {
+  id       Int              @id @default(autoincrement())
+  nama     String           @unique
+  createdAt DateTime       @default(now()) @map("created_at")
+  profiles PesertaProfile[]
+  exams    ExamGroup[]
+
+  @@map("groups")
+}
+
+model ExamGroup {
+  examId  Int   @map("exam_id")
+  groupId Int   @map("group_id")
+  exam    Exam  @relation(fields: [examId], references: [id], onDelete: Cascade)
+  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([examId, groupId])
+  @@map("exam_groups")
+}
+
+model ExamToken {
+  id        Int       @id @default(autoincrement())
+  examId    Int       @map("exam_id")
+  token     String
+  expiresAt DateTime  @map("expires_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdBy Int?      @map("created_by")
+  exam      Exam      @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@map("exam_tokens")
+}
+
+model ExamQuestion {
+  examId     Int      @map("exam_id")
+  questionId Int      @map("question_id")
+  bobot      Decimal? @db.Decimal(6, 2)
+  urutan     Int      @default(0)
+  exam       Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@id([examId, questionId])
+  @@map("exam_questions")
+}
