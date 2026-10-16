@@ -1,6 +1,9 @@
 import express from 'express'
 import cors from 'cors'
 import http from 'node:http'
+import path from 'node:path'
+import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import jwt from 'jsonwebtoken'
 import { Server } from 'socket.io'
 import { hub, auth, requireRole, JWT_SECRET } from './lib.js'
@@ -19,6 +22,13 @@ app.get('/api/health', (req, res) => res.json({ ok: true }))
 app.use('/api/auth', authRoutes)
 app.use('/api/me', auth, requireRole('peserta'), pesertaRoutes)
 app.use('/api/admin', auth, requireRole('admin'), adminRoutes)
+
+// Produksi/percobaan: sajikan hasil build frontend dari server yang sama (satu alamat untuk web + API)
+const dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../frontend/dist')
+if (fs.existsSync(dist)) {
+  app.use(express.static(dist))
+  app.get(/^\/(?!api|socket\.io).*/, (req, res) => res.sendFile(path.join(dist, 'index.html')))
+}
 
 app.use((err, req, res, next) => {
   if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ message: 'Ukuran berkas maksimal 5 MB' })
