@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Plus, Clock, FileQuestion, Users, KeyRound, Pencil, Trash2, Activity } from 'lucide-react'
 import { api } from '../../api.js'
 import { Button, Input, Textarea, Card, Badge, Modal, ErrorText } from '../../components/ui.jsx'
+import { confirmDialog } from '../../components/Confirm.jsx'
 
 const blank = () => ({ judul: '', petunjuk: '', durasiMenit: 60, tampilkanHasil: false, acakSoal: false, nilaiKelulusan: 60, aktif: true, groupIds: [] })
 
@@ -33,7 +34,7 @@ export default function Ujian() {
   }
   const toggleAktif = async (e) => { await api(`/admin/exams/${e.id}/aktif`, { method: 'PUT', body: { aktif: !e.aktif } }); load() }
   const remove = async (e) => {
-    if (!confirm(`Hapus ujian "${e.judul}" beserta soal, token, dan jawaban peserta?`)) return
+    if (!(await confirmDialog({ title: 'Hapus ujian?', message: `Ujian "${e.judul}" akan dihapus beserta soal, token, dan jawaban peserta.`, confirmText: 'Ya, hapus' }))) return
     await api(`/admin/exams/${e.id}`, { method: 'DELETE' }); load()
   }
   const toggleGroup = (id) => setForm({ ...form, groupIds: form.groupIds.includes(id) ? form.groupIds.filter((x) => x !== id) : [...form.groupIds, id] })

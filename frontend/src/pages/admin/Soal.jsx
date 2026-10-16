@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Upload, Download, Eye, FileSpreadsheet, Search, Pencil, Trash2, Copy, ChevronLeft, ChevronRight, BookOpen, AlertTriangle, ListChecks, ToggleLeft, PenLine } from 'lucide-react'
 import { api, download } from '../../api.js'
 import { Button, Input, Textarea, Select, Card, Modal, ErrorText } from '../../components/ui.jsx'
+import { confirmDialog } from '../../components/Confirm.jsx'
 
 const TIPE = { pilihan_ganda: 'Pilihan ganda', esai: 'Esai', benar_salah: 'Benar/Salah' }
 const TIPE_STYLE = { pilihan_ganda: 'bg-blue-100 text-blue-800', benar_salah: 'bg-sky-100 text-sky-800', esai: 'bg-amber-100 text-amber-800' }
@@ -77,8 +78,8 @@ export default function Soal() {
   }
   const duplicate = async (x) => { await api(`/admin/questions/${x.id}/duplicate`, { method: 'POST' }); load() }
   const remove = async (x) => {
-    const warn = x.jumlahUjian ? `\n\nSoal ini dipakai di ${x.jumlahUjian} ujian dan akan dilepas dari ujian tersebut.` : ''
-    if (!confirm(`Hapus soal ini dari bank soal?${warn}`)) return
+    const warn = x.jumlahUjian ? ` Soal ini dipakai di ${x.jumlahUjian} ujian dan akan dilepas dari ujian tersebut.` : ''
+    if (!(await confirmDialog({ title: 'Hapus soal?', message: `Soal ini akan dihapus dari bank soal.${warn}`, confirmText: 'Ya, hapus' }))) return
     try { await api(`/admin/questions/${x.id}`, { method: 'DELETE' }); load() } catch (err) { alert(err.message) }
   }
 

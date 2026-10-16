@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Upload, Download, KeyRound, Search, Pencil, Trash2, Copy, Check, Dices, FileSpreadsheet, AlertTriangle, ChevronLeft, ChevronRight, Users } from 'lucide-react'
 import { api, download } from '../../api.js'
 import { Button, Input, Select, Card, Modal, ErrorText, downloadCsv } from '../../components/ui.jsx'
+import { confirmDialog } from '../../components/Confirm.jsx'
 
 const empty = { nama_lengkap: '', email: '', groupId: '', username: '', password: '' }
 const PER_PAGE = 10
@@ -85,7 +86,7 @@ export default function Peserta() {
     } catch (err) { setError(err.message) }
   }
   const resetRandom = async () => {
-    if (!confirm(`Buat password acak baru untuk ${edit.username}? Password lama tidak berlaku lagi.`)) return
+    if (!(await confirmDialog({ title: 'Buat password baru?', message: `Password acak baru akan dibuat untuk ${edit.username}. Password lama tidak berlaku lagi.`, confirmText: 'Ya, buat baru', danger: false }))) return
     setError('')
     try {
       const c = await api(`/admin/peserta/${edit.id}/reset-password`, { method: 'POST' })
@@ -116,7 +117,7 @@ export default function Peserta() {
   }
   const toggle = async (u) => { await api(`/admin/peserta/${u.id}`, { method: 'PUT', body: { status: u.status === 'aktif' ? 'nonaktif' : 'aktif' } }); load() }
   const remove = async (u) => {
-    if (!confirm(`Hapus peserta ${u.namaLengkap}? Seluruh data pengerjaannya ikut terhapus.`)) return
+    if (!(await confirmDialog({ title: 'Hapus peserta?', message: `Peserta ${u.namaLengkap} akan dihapus beserta seluruh data pengerjaannya.`, confirmText: 'Ya, hapus' }))) return
     await api(`/admin/peserta/${u.id}`, { method: 'DELETE' }); load()
   }
   const GroupOptions = () => <>{groups.map((g) => <option key={g.id} value={g.id}>{g.nama}</option>)}</>

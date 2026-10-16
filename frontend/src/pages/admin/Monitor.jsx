@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { io } from 'socket.io-client'
 import { api, getToken, API_BASE } from '../../api.js'
 import { useExamPicker } from '../../components/ExamPicker.jsx'
-import { Card, Badge, fmtDate } from '../../components/ui.jsx'
+import { Card, Badge, Button, fmtDate } from '../../components/ui.jsx'
+import { confirmDialog } from '../../components/Confirm.jsx'
 
 const ST = { belum_mulai: ['slate', 'Belum mulai'], sedang_mengerjakan: ['amber', 'Sedang mengerjakan'], selesai: ['green', 'Selesai'] }
 
@@ -18,6 +19,12 @@ export default function Monitor() {
     socket.on('monitor:update', (m) => { if (m.examId === examId) load() })
     return () => { clearInterval(poll); socket.disconnect() }
   }, [load, examId])
+
+  const reset = async (r) => {
+    if (!(await confirmDialog({ title: 'Reset ujian peserta?', message: `Ujian ${r.nama} akan dikembalikan ke "Belum mulai". Seluruh jawaban dan nilainya dihapus, lalu peserta bisa mengulang dari awal.`, confirmText: 'Ya, reset' }))) return
+    try { await api(`/admin/exams/${examId}/monitor/${r.userId}/reset`, { method: 'POST' }); load() }
+    catch (e) { alert(e.message || 'Gagal mereset') }
+  }
 
   if (!loaded) return <Card className="text-slate-500">Belum ada ujian.</Card>
   const count = (s) => rows.filter((r) => r.status === s).length
@@ -36,7 +43,12 @@ export default function Monitor() {
             {rows.map((r) => (
               <tr key={r.userId} className="border-t">
                 <td className="px-4 py-2">{r.nama}<div className="text-xs text-slate-500 font-mono">{r.username}</div></td>
-                <td className="px-4 py-2"><Badge color={ST[r.status][0]}>{ST[r.status][1]}</Badge></td>
+                <td className="px-4 py-2">
+                  <div className="flex items-center gap-2">
+                    <Badge color={ST[r.status][0]}>{ST[r.status][1]}</Badge>
+                    {r.status !== 'belum_mulai' && <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => reset(r)}>Reset</Button>}
+                  </div>
+                </td>
                 <td className="px-4 py-2">{fmtDate(r.waktuMulai)}</td>
                 <td className="px-4 py-2">{r.lastSeen ? new Date(r.lastSeen).toLocaleTimeString('id-ID') : '-'}</td>
                 <td className="px-4 py-2 space-x-1">

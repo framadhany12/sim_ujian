@@ -3,6 +3,7 @@ import { useSearchParams, Link } from 'react-router-dom'
 import { KeyRound, Copy, Check, Timer, Ban, Wand2, AlertCircle } from 'lucide-react'
 import { api } from '../../api.js'
 import { Button, Card, Badge, ErrorText, fmtDate } from '../../components/ui.jsx'
+import { confirmDialog } from '../../components/Confirm.jsx'
 
 const DURASI = [['30m', '30 menit'], ['1h', '1 jam'], ['4h', '4 jam'], ['12h', '12 jam'], ['1d', '1 hari']]
 
@@ -51,12 +52,11 @@ export default function Token() {
     catch (err) { setError(err.message) } finally { setBusy(false) }
   }
   const revoke = async (t) => {
-    if (!confirm(`Cabut token ${t.token}? Peserta tidak bisa lagi memakainya untuk masuk (yang sudah mengerjakan tidak terganggu).`)) return
+    if (!(await confirmDialog({ title: 'Cabut token?', message: `Token ${t.token} akan dihapus. Peserta tidak bisa lagi memakainya untuk masuk (yang sudah mengerjakan tidak terganggu).`, confirmText: 'Ya, cabut' }))) return
     await api(`/admin/tokens/${t.id}`, { method: 'DELETE' }); if (fresh?.id === t.id) setFresh(null); load()
   }
 
   const active = tokens.filter((t) => t.status === 'aktif' && new Date(t.expiresAt) > now)
-  const history = tokens.filter((t) => !active.includes(t))
 
   return (
     <div className="space-y-5 max-w-5xl">
@@ -107,7 +107,7 @@ export default function Token() {
             <p className="text-sm text-slate-600">Token untuk <b className="text-blue-950">{fresh.judul}</b></p>
             <CopyToken token={fresh.token} big />
             <p className="text-sm text-slate-600">Berlaku sampai <b>{fmtDate(fresh.expiresAt)}</b> · sisa <b className="font-mono">{sisa(fresh.expiresAt, now)}</b></p>
-            <p className="text-xs text-slate-500">Token lama untuk ujian ini otomatis dicabut. Klik token untuk menyalin.</p>
+            <p className="text-xs text-slate-500">Token lama untuk ujian ini otomatis dihapus. Klik token untuk menyalin.</p>
           </div>
         )}
       </Card>
@@ -126,22 +126,6 @@ export default function Token() {
         ))}
       </section>
 
-      {history.length > 0 && (
-        <section className="space-y-3">
-          <h3 className="font-bold text-blue-950">Riwayat token</h3>
-          <Card className="!p-0 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-page/70 text-left text-[11px] uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-3">Ujian</th><th className="px-4 py-3">Token</th><th className="px-4 py-3">Dibuat</th><th className="px-4 py-3">Berlaku sampai</th><th className="px-4 py-3">Status</th></tr></thead>
-              <tbody className="divide-y divide-line">
-                {history.slice(0, 20).map((t) => (
-                  <tr key={t.id}><td className="px-5 py-2.5">{t.judul}</td><td className="px-4 py-2.5 font-mono text-slate-500">{t.token}</td><td className="px-4 py-2.5 text-slate-500">{fmtDate(t.createdAt)}</td><td className="px-4 py-2.5 text-slate-500">{fmtDate(t.expiresAt)}</td>
-                    <td className="px-4 py-2.5"><Badge color={t.status === 'dicabut' ? 'red' : 'slate'}>{t.status === 'dicabut' ? 'dicabut' : 'kedaluwarsa'}</Badge></td></tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-        </section>
-      )}
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import './index.css'
+import { ConfirmHost } from './components/Confirm.jsx'
 import { AuthProvider, Protected } from './auth.jsx'
 import PesertaLayout from './components/PesertaLayout.jsx'
 import TataTertib from './pages/TataTertib.jsx'
@@ -53,6 +54,7 @@ createRoot(document.getElementById('root')).render(
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </AuthProvider>
+      <ConfirmHost />
     </BrowserRouter>
   </StrictMode>,
 )

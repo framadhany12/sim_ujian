@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Plus, Pencil, Trash2, Check, X, Users, CalendarClock } from 'lucide-react'
 import { api } from '../../api.js'
 import { Button, Card, ErrorText } from '../../components/ui.jsx'
+import { confirmDialog } from '../../components/Confirm.jsx'
 
 export default function Grup() {
   const [groups, setGroups] = useState(null)
@@ -16,7 +17,7 @@ export default function Grup() {
   const run = async (fn) => { setError(''); try { await fn(); load() } catch (err) { setError(err.message) } }
   const add = (e) => { e.preventDefault(); if (nama.trim()) run(async () => { await api('/admin/groups', { method: 'POST', body: { nama } }); setNama('') }) }
   const rename = () => run(async () => { await api(`/admin/groups/${editing.id}`, { method: 'PUT', body: { nama: editing.nama } }); setEditing(null) })
-  const remove = (g) => confirm(`Hapus grup "${g.nama}"? Peserta di dalamnya menjadi tanpa grup dan ujian tidak lagi tampil untuk grup ini.`) && run(() => api(`/admin/groups/${g.id}`, { method: 'DELETE' }))
+  const remove = async (g) => (await confirmDialog({ title: 'Hapus grup?', message: `Grup "${g.nama}" akan dihapus. Peserta di dalamnya menjadi tanpa grup dan ujian tidak lagi tampil untuk grup ini.`, confirmText: 'Ya, hapus' })) && run(() => api(`/admin/groups/${g.id}`, { method: 'DELETE' }))
 
   return (
     <div className="space-y-5 max-w-4xl">

@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Plus, X, ChevronUp, ChevronDown, Search, Save, Wand2, AlertTriangle, CheckCircle2, ListPlus } from 'lucide-react'
 import { api } from '../../api.js'
 import { Button, Card, ErrorText } from '../../components/ui.jsx'
+import { confirmDialog } from '../../components/Confirm.jsx'
 import { TipeBadge } from './Soal.jsx'
 
 const r2 = (n) => Math.round(n * 100) / 100
@@ -64,7 +65,7 @@ export default function SusunSoal() {
   const save = async () => {
     setError('')
     if (sel.some((s) => !(Number(s.bobot) > 0))) return setError('Setiap soal harus punya bobot lebih dari 0.')
-    if (exam.jumlahPeserta > 0 && !confirm(`Ujian ini sudah dikerjakan ${exam.jumlahPeserta} peserta. Mengubah soal atau bobot memengaruhi penilaian. Tetap simpan?`)) return
+    if (exam.jumlahPeserta > 0 && !(await confirmDialog({ title: 'Tetap simpan perubahan?', message: `Ujian ini sudah dikerjakan ${exam.jumlahPeserta} peserta. Mengubah soal atau bobot memengaruhi penilaian.`, confirmText: 'Ya, simpan' }))) return
     setBusy(true)
     try {
       await api(`/admin/exams/${id}/questions`, { method: 'PUT', body: { items: sel.map((s) => ({ questionId: s.id, bobot: Number(s.bobot) })) } })

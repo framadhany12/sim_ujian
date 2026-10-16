@@ -392,11 +392,13 @@ const serializeToken = (t) => {
 }
 
 r.get('/tokens', wrap(async (req, res) => {
+  // Riwayat tidak disimpan: token kedaluwarsa/dicabut dibersihkan setiap daftar dibuka
+  await prisma.examToken.deleteMany({ where: { OR: [{ expiresAt: { lte: new Date() } }, { revokedAt: { not: null } }] } })
   const tokens = await prisma.examToken.findMany({ orderBy: { id: 'desc' }, take: 100, include: { exam: { select: { judul: true } } } })
   res.json(tokens.map(serializeToken))
 }))
 
-// Buat token otomatis untuk ujian terpilih; token aktif sebelumnya untuk ujian yang sama dicabut
+// Buat token otomatis untuk ujian terpilih; token aktif sebelumnya untuk ujian yang sama langsung dihapus
 r.post('/tokens', wrap(async (req, res) => {
   const examId = +req.body?.examId
   const minutes = TOKEN_DURATIONS[req.body?.durasi]
@@ -412,7 +414,7 @@ r.post('/tokens', wrap(async (req, res) => {
   let token
   do { token = randomToken(6) } while (inUse.has(token))
   const [, created] = await prisma.$transaction([
-    prisma.examToken.updateMany({ where: { examId, revokedAt: null, expiresAt: { gt: now } }, data: { revokedAt: now } }),
+    prisma.examToken.deleteMany({ where: { OR: [{ examId, expiresAt: { gt: now } }, { revokedAt: { not: null } }] } }),
     prisma.examToken.create({ data: { examId, token, expiresAt: new Date(now.getTime() + minutes * 60000), createdBy: req.user.id }, include: { exam: { select: { judul: true } } } }),
   ])
   await audit(req.user.id, 'buat_token', exam.judul + ' (' + req.body.durasi + ')')
@@ -420,9 +422,10 @@ r.post('/tokens', wrap(async (req, res) => {
 }))
 
 r.delete('/tokens/:id', wrap(async (req, res) => {
-  const t = await prisma.examToken.update({ where: { id: +req.params.id }, data: { revokedAt: new Date() }, include: { exam: { select: { judul: true } } } })
+  // Dicabut = dihapus permanen dari database (tidak disimpan sebagai riwayat)
+  const t = await prisma.examToken.delete({ where: { id: +req.params.id }, include: { exam: { select: { judul: true } } } })
   await audit(req.user.id, 'cabut_token', t.exam.judul)
-  res.json(serializeToken(t))
+  res.json({ ok: true })
 }))
 
 /* ───────────── Bank soal ───────────── */
@@ -694,6 +697,17 @@ r.get('/exams/:id/monitor', wrap(async (req, res) => {
       keluarHalaman: keluar, terputus: !!terputus,
     }
   }))
+}))
+
+// Reset pengerjaan peserta → kembali "belum mulai" (jawaban & log attempt ikut terhapus) agar bisa mengulang
+r.post('/exams/:id/monitor/:userId/reset', wrap(async (req, res) => {
+  const examId = +req.params.id, userId = +req.params.userId
+  const attempt = await prisma.examAttempt.findUnique({ where: { examId_userId: { examId, userId } }, include: { user: { include: { profile: true } } } })
+  if (!attempt) return res.status(404).json({ message: 'Peserta belum memulai ujian ini' })
+  await prisma.examAttempt.delete({ where: { id: attempt.id } })
+  await audit(req.user.id, 'reset_ujian', `${attempt.user.profile?.namaLengkap ?? attempt.user.username} pada ujian ${examId} (status sebelumnya: ${attempt.status})`)
+  notifyMonitor(examId)
+  res.json({ ok: true })
 }))
 
 /* ───────────── Penilaian esai ───────────── */
