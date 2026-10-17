@@ -6,7 +6,7 @@ import { Card, fmtDate } from '../../components/ui.jsx'
 
 const EVENT_LABEL = {
   login: 'masuk ke aplikasi', mulai: 'memulai ujian', submit: 'mengirim jawaban', keluar_halaman: 'keluar dari halaman ujian',
-  kembali_halaman: 'kembali ke halaman ujian', reconnect: 'tersambung kembali', ganti_password: 'mengganti password',
+  kembali_halaman: 'kembali ke halaman ujian', pindah_tab: 'berpindah tab/aplikasi saat ujian', salin_tempel: 'mencoba salin/tempel saat ujian', screenshot: 'mencoba screenshot saat ujian', pelanggaran: 'melanggar aturan ujian', reconnect: 'tersambung kembali', ganti_password: 'mengganti password',
   tambah_peserta: 'menambah peserta', impor_peserta: 'impor peserta', reset_password: 'reset password', buat_ujian: 'membuat ujian',
   ubah_ujian: 'mengubah ujian', hapus_ujian: 'menghapus ujian', impor_soal: 'impor soal', nilai_esai: 'menilai esai',
   minta_reset: 'meminta reset password', ubah_peserta: 'mengubah peserta', hapus_peserta: 'menghapus peserta', atur_tampil_hasil: 'mengatur tampil hasil',

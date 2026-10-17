@@ -316,6 +316,7 @@ const examData = (b) => ({
   aktif: b.aktif !== false,
   tampilkanHasil: !!b.tampilkanHasil,
   acakSoal: !!b.acakSoal,
+  jumlahSoalTampil: parseInt(b.jumlahSoalTampil, 10) > 0 ? parseInt(b.jumlahSoalTampil, 10) : null,
   nilaiKelulusan: Number(b.nilaiKelulusan ?? 60),
 })
 const validExam = (d) =>
@@ -689,7 +690,7 @@ r.get('/exams/:id/monitor', wrap(async (req, res) => {
   const now = Date.now()
   res.json(peserta.map((u) => {
     const a = byUser.get(u.id)
-    const keluar = a?.logs.filter((l) => l.event === 'keluar_halaman').length ?? 0
+    const keluar = a?.logs.filter((l) => ['keluar_halaman', 'pindah_tab'].includes(l.event)).length ?? 0
     const terputus = a?.status === 'sedang_mengerjakan' && a.lastSeen && now - a.lastSeen.getTime() > 45000
     return {
       userId: u.id, nama: u.profile?.namaLengkap ?? u.username, username: u.username, grup: u.profile?.group?.nama ?? null,

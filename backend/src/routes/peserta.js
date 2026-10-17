@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { effBobot, prisma, wrap, audit, notifyMonitor, seededShuffle, attemptEnd, finalizeAttempt } from '../lib.js'
+import { effBobot, prisma, wrap, audit, notifyMonitor, seededShuffle, attemptEnd, finalizeAttempt, assignQuestions, attemptExamQuestions } from '../lib.js'
 
 const r = Router()
 
@@ -26,7 +26,7 @@ r.get('/exams', wrap(async (req, res) => {
     const a = byExam.get(e.id)
     return {
       id: e.id, judul: e.judul, petunjuk: e.petunjuk, durasiMenit: e.durasiMenit,
-      jumlahSoal: e._count.questions, tampilkanHasil: e.tampilkanHasil,
+      jumlahSoal: e.jumlahSoalTampil ? Math.min(e.jumlahSoalTampil, e._count.questions) : e._count.questions, tampilkanHasil: e.tampilkanHasil,
       dibuka: e.aktif && openUntil.has(e.id), dibukaSampai: e.aktif ? openUntil.get(e.id) ?? null : null,
       attemptId: a?.id ?? null, status: a?.status ?? 'belum_mulai',
       skor: a?.status === 'selesai' && e.tampilkanHasil && a.skorTotal != null ? Number(a.skorTotal) : null,
@@ -37,7 +37,7 @@ r.get('/exams', wrap(async (req, res) => {
 }))
 
 async function buildPayload(attempt, exam) {
-  const eqs = await prisma.examQuestion.findMany({ where: { examId: exam.id }, include: { question: { include: { options: { orderBy: { label: 'asc' } } } } }, orderBy: { urutan: 'asc' } })
+  const eqs = await attemptExamQuestions(attempt, { question: { include: { options: { orderBy: { label: 'asc' } } } } })
   const questions = eqs.map((eq) => ({ ...eq.question, bobot: effBobot(eq) }))
   const answers = await prisma.answer.findMany({ where: { attemptId: attempt.id } })
   let list = exam.acakSoal ? seededShuffle(questions, attempt.id) : questions
@@ -74,6 +74,7 @@ r.post('/exams/:id/start', wrap(async (req, res) => {
     attempt = await prisma.examAttempt.create({
       data: { examId: exam.id, userId: req.user.id, waktuMulai: now, status: 'sedang_mengerjakan', lastSeen: now },
     })
+    await assignQuestions(attempt, exam)
     await audit(req.user.id, 'mulai', null, attempt.id)
     notifyMonitor(exam.id)
   } else {
@@ -113,7 +114,7 @@ r.put('/attempts/:id/answers/:qid', wrap(async (req, res) => {
     return res.status(409).json({ message: 'Waktu habis', expired: true })
   }
   const qid = +req.params.qid
-  const q = await prisma.examQuestion.findUnique({ where: { examId_questionId: { examId: attempt.examId, questionId: qid } } })
+  const q = (await attemptExamQuestions(attempt, undefined)).find((x) => x.questionId === qid)
   if (!q) return res.status(404).json({ message: 'Soal tidak ditemukan' })
   const data = {}
   if ('jawaban' in req.body) data.jawaban = String(req.body.jawaban ?? '')
@@ -127,7 +128,7 @@ r.put('/attempts/:id/answers/:qid', wrap(async (req, res) => {
   res.json({ ok: true })
 }))
 
-const EVENTS = ['keluar_halaman', 'kembali_halaman', 'reconnect', 'heartbeat']
+const EVENTS = ['keluar_halaman', 'kembali_halaman', 'reconnect', 'heartbeat', 'pindah_tab', 'salin_tempel', 'screenshot', 'pelanggaran']
 r.post('/attempts/:id/event', wrap(async (req, res) => {
   const attempt = await ownAttempt(req, res); if (!attempt) return
   const ev = req.body?.event
@@ -150,7 +151,7 @@ r.get('/exams/:id/result', wrap(async (req, res) => {
   const attempt = exam && await prisma.examAttempt.findUnique({ where: { examId_userId: { examId: exam.id, userId: req.user.id } } })
   if (!attempt || attempt.status !== 'selesai') return res.status(404).json({ message: 'Belum ada hasil' })
   if (!exam.tampilkanHasil) return res.json({ tampil: false })
-  const eqs = await prisma.examQuestion.findMany({ where: { examId: exam.id }, include: { question: { include: { options: true } } }, orderBy: { urutan: 'asc' } })
+  const eqs = await attemptExamQuestions(attempt, { question: { include: { options: true } } })
   const questions = eqs.map((eq) => ({ ...eq.question, bobot: effBobot(eq) }))
   const answers = new Map((await prisma.answer.findMany({ where: { attemptId: attempt.id } })).map((a) => [a.questionId, a]))
   res.json({

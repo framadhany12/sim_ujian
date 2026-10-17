@@ -73,6 +73,7 @@ model Exam {
   aktif          Boolean       @default(true)
   tampilkanHasil Boolean       @default(false) @map("tampilkan_hasil")
   acakSoal       Boolean       @default(false) @map("acak_soal")
+  jumlahSoalTampil Int?        @map("jumlah_soal_tampil")
   nilaiKelulusan Decimal       @default(60) @db.Decimal(6, 2) @map("nilai_kelulusan")
   createdBy      Int           @map("created_by")
   creator        User          @relation(fields: [createdBy], references: [id])
@@ -97,6 +98,7 @@ model Question {
   options       Option[]
   answers       Answer[]
   examLinks     ExamQuestion[]
+  attemptLinks  AttemptQuestion[]
 
   @@map("questions")
 }
@@ -126,6 +128,7 @@ model ExamAttempt {
   user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   answers          Answer[]
   logs             ActivityLog[]
+  soalTerpilih     AttemptQuestion[]
 
   @@unique([examId, userId])
   @@map("exam_attempts")
@@ -203,4 +206,15 @@ model ExamQuestion {
 
   @@id([examId, questionId])
   @@map("exam_questions")
+}
+
+model AttemptQuestion {
+  attemptId  Int         @map("attempt_id")
+  questionId Int         @map("question_id")
+  urutan     Int         @default(0)
+  attempt    ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question   Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@id([attemptId, questionId])
+  @@map("attempt_questions")
 }

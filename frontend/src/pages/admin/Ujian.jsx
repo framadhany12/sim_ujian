@@ -5,7 +5,7 @@ import { api } from '../../api.js'
 import { Button, Input, Textarea, Card, Badge, Modal, ErrorText } from '../../components/ui.jsx'
 import { confirmDialog } from '../../components/Confirm.jsx'
 
-const blank = () => ({ judul: '', petunjuk: '', durasiMenit: 60, tampilkanHasil: false, acakSoal: false, nilaiKelulusan: 60, aktif: true, groupIds: [] })
+const blank = () => ({ judul: '', petunjuk: '', durasiMenit: 60, tampilkanHasil: false, acakSoal: false, jumlahSoalTampil: '', nilaiKelulusan: 60, aktif: true, groupIds: [] })
 
 function Switch({ checked, onChange, label }) {
   return (
@@ -62,6 +62,7 @@ export default function Ujian() {
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
                   {e.tokenAktif ? <Badge color="green">token aktif</Badge> : <Badge>belum dibuka</Badge>}
                   {e.acakSoal && <Badge color="blue">soal diacak</Badge>}
+                  {e.jumlahSoalTampil && <Badge color="blue">{e.jumlahSoalTampil} soal acak/peserta</Badge>}
                   {e.tampilkanHasil && <Badge color="amber">hasil tampil ke peserta</Badge>}
                 </div>
               </div>
@@ -103,6 +104,7 @@ export default function Ujian() {
             <div className="sm:col-span-2"><Textarea label="Petunjuk pengerjaan" rows={3} value={form.petunjuk} onChange={set('petunjuk')} /></div>
             <Input label="Durasi pengerjaan (menit)" type="number" min="1" value={form.durasiMenit} onChange={set('durasiMenit')} required />
             <Input label="Nilai kelulusan (0–100)" type="number" min="0" max="100" value={form.nilaiKelulusan} onChange={set('nilaiKelulusan')} required />
+            <Input label="Jumlah soal per peserta (kosong = semua)" type="number" min="1" value={form.jumlahSoalTampil ?? ''} onChange={set('jumlahSoalTampil')} placeholder="mis. 50 dari bank 200 soal" />
 
             <div className="sm:col-span-2">
               <p className="text-sm text-slate-600 mb-1.5">Dilaksanakan di grup</p>

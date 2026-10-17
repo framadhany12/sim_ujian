@@ -4,6 +4,7 @@ import { Flag, ChevronLeft, ChevronRight, Send, X, CheckCircle2, Check } from 'l
 import ExamTimer from '../components/ExamTimer.jsx'
 import Logo from '../components/Logo.jsx'
 import { api } from '../api.js'
+import useExamLock from '../components/useExamLock.js'
 
 const LETTERS = 'ABCDE'
 const TIPE = { pilihan_ganda: 'Pilihan ganda', benar_salah: 'Benar / Salah', esai: 'Esai' }
@@ -33,14 +34,14 @@ export default function ExamPage() {
 
   const post = useCallback((event) => api(`/me/attempts/${attemptId}/event`, { method: 'POST', body: { event } }).catch(() => {}), [attemptId])
 
-  // Pantau keluar halaman + heartbeat koneksi
+  // Heartbeat koneksi; pelanggaran dipantau oleh useExamLock
   useEffect(() => {
     if (!data || submitted) return
-    const onVis = () => post(document.hidden ? 'keluar_halaman' : 'kembali_halaman')
-    document.addEventListener('visibilitychange', onVis)
     const hb = setInterval(() => post('heartbeat'), 20000)
-    return () => { document.removeEventListener('visibilitychange', onVis); clearInterval(hb) }
+    return () => clearInterval(hb)
   }, [data, submitted, post])
+
+  const lock = useExamLock(!!data && !submitted, post)
 
   const save = useCallback(async (qid, patch, delay = 0) => {
     clearTimeout(timers.current[qid])
@@ -92,7 +93,7 @@ export default function ExamPage() {
   }
 
   return (
-    <div className="min-h-screen bg-page">
+    <div className="exam-locked min-h-screen bg-page">
       <header className="bg-white border-b border-line">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-3">
           <Logo height={28} />
@@ -174,6 +175,20 @@ export default function ExamPage() {
           </aside>
         </div>
       </div>
+
+      {lock.hidden && <div className="fixed inset-0 z-40 bg-blue-950" />}
+      {(!lock.fullscreen || lock.warning) && (
+        <div role="alertdialog" className="fixed inset-0 z-50 bg-blue-950/95 grid place-items-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full text-center">
+            <h2 className="font-extrabold text-xl text-blue-950 mb-2">{lock.warning ? 'Peringatan pelanggaran' : 'Mode layar penuh diperlukan'}</h2>
+            <p className="text-sm text-slate-600">{lock.warning || 'Ujian wajib dikerjakan dalam layar penuh. Waktu tetap berjalan.'}</p>
+            {lock.violations > 0 && <p className="text-xs text-red-600 mt-2">Total pelanggaran tercatat: {lock.violations}</p>}
+            <button onClick={() => { lock.enterFullscreen(); lock.dismiss() }} className="mt-5 px-5 py-2.5 rounded-xl bg-amber-400 text-blue-950 font-bold hover:bg-amber-300">
+              {lock.fullscreen ? 'Saya mengerti, lanjutkan' : 'Masuk layar penuh'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {confirming && (
         <div className="fixed inset-0 bg-blue-950/60 grid place-items-center p-4 z-20">
