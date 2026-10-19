@@ -1,4 +1,6 @@
 import { Router } from 'express'
+import multer from 'multer'
+import { listShots, saveShot } from '../camera.js'
 import { effBobot, prisma, wrap, audit, notifyMonitor, seededShuffle, attemptEnd, finalizeAttempt, assignQuestions, attemptExamQuestions } from '../lib.js'
 
 const r = Router()
@@ -128,7 +130,22 @@ r.put('/attempts/:id/answers/:qid', wrap(async (req, res) => {
   res.json({ ok: true })
 }))
 
-const EVENTS = ['keluar_halaman', 'kembali_halaman', 'reconnect', 'heartbeat', 'pindah_tab', 'salin_tempel', 'screenshot', 'pelanggaran']
+// Foto kamera berkala (JPEG kecil dari browser peserta)
+const cameraUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 400 * 1024 } })
+r.post('/attempts/:id/camera', cameraUpload.single('foto'), wrap(async (req, res) => {
+  const attempt = await ownAttempt(req, res); if (!attempt) return
+  if (attempt.status !== 'sedang_mengerjakan') return res.status(409).json({ message: 'Ujian tidak sedang berjalan' })
+  const buf = req.file?.buffer
+  if (!buf || buf[0] !== 0xff || buf[1] !== 0xd8) return res.status(400).json({ message: 'Foto kamera tidak valid' })
+  const [last] = await listShots(attempt.id)
+  if (last && Date.now() - last < 20000) return res.json({ ok: true, skipped: true })
+  await saveShot(attempt.id, buf)
+  await prisma.examAttempt.update({ where: { id: attempt.id }, data: { lastSeen: new Date() } })
+  notifyMonitor(attempt.examId)
+  res.json({ ok: true })
+}))
+
+const EVENTS = ['keluar_halaman', 'kembali_halaman', 'reconnect', 'heartbeat', 'pindah_tab', 'salin_tempel', 'screenshot', 'pelanggaran', 'kamera_mati']
 r.post('/attempts/:id/event', wrap(async (req, res) => {
   const attempt = await ownAttempt(req, res); if (!attempt) return
   const ev = req.body?.event

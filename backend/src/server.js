@@ -10,6 +10,7 @@ import { hub, auth, requireRole, JWT_SECRET } from './lib.js'
 import authRoutes from './routes/auth.js'
 import pesertaRoutes from './routes/peserta.js'
 import adminRoutes from './routes/admin.js'
+import { scheduleCleanup } from './camera.js'
 
 const app = express()
 // Izinkan CLIENT_ORIGIN, serta localhost di port berapa pun (Vite pindah port bila 5173 terpakai)
@@ -31,7 +32,7 @@ if (fs.existsSync(dist)) {
 }
 
 app.use((err, req, res, next) => {
-  if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ message: 'Ukuran berkas maksimal 5 MB' })
+  if (err.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ message: req.path.endsWith('/camera') ? 'Foto kamera terlalu besar' : 'Ukuran berkas maksimal 5 MB' })
   if (err.name === 'MulterError') return res.status(400).json({ message: 'Berkas tidak dapat diunggah. Pilih berkas .xlsx, .xls, atau .csv.' })
   if (err.status && err.status < 500) return res.status(err.status).json({ message: err.message })
   console.error(err)
@@ -49,3 +50,4 @@ hub.io.on('connection', (socket) => {
 
 const port = process.env.PORT || 4000
 server.listen(port, () => console.log(`API berjalan di http://localhost:${port}`))
+scheduleCleanup()

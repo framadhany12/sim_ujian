@@ -1,15 +1,59 @@
 import { useCallback, useEffect, useState } from 'react'
 import { io } from 'socket.io-client'
-import { api, getToken, API_BASE } from '../../api.js'
+import { CameraOff } from 'lucide-react'
+import { api, getToken, API_BASE, blobUrl } from '../../api.js'
 import { useExamPicker } from '../../components/ExamPicker.jsx'
-import { Card, Badge, Button, fmtDate } from '../../components/ui.jsx'
+import { Card, Badge, Button, Modal, fmtDate } from '../../components/ui.jsx'
 import { confirmDialog } from '../../components/Confirm.jsx'
+
+const jam = (ts) => new Date(ts).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+
+// Foto kamera dimuat lewat fetch ber-Authorization, lalu ditampilkan sebagai object URL
+function CamPhoto({ attemptId, ts, className }) {
+  const [src, setSrc] = useState(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let url, alive = true
+    setFailed(false)
+    blobUrl(`/admin/attempts/${attemptId}/camera/${ts}`).then((u) => { url = u; if (alive) setSrc(u); else URL.revokeObjectURL(u) }).catch(() => alive && setFailed(true))
+    return () => { alive = false; if (url) URL.revokeObjectURL(url) }
+  }, [attemptId, ts])
+  if (failed) return <div className={`grid place-items-center bg-slate-100 text-[11px] text-slate-500 ${className}`}>gagal dimuat</div>
+  return src ? <img src={src} alt={`Foto kamera pukul ${jam(ts)}`} className={`object-cover bg-slate-100 ${className}`} /> : <div className={`bg-slate-100 animate-pulse ${className}`} />
+}
+
+function CamGallery({ row, onClose }) {
+  const [shots, setShots] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => { api(`/admin/attempts/${row.attemptId}/camera`).then((d) => setShots(d.shots)).catch((e) => setError(e.message)) }, [row.attemptId])
+  return (
+    <Modal title={`Foto kamera: ${row.nama}`} onClose={onClose} wide>
+      {error && <p className="text-sm text-red-600">Gagal memuat daftar foto: {error}</p>}
+      {!shots && !error && <p className="text-sm text-slate-500">Memuat foto…</p>}
+      {shots?.length === 0 && <p className="text-sm text-slate-500">Belum ada foto. Foto pertama diambil beberapa detik setelah peserta membuka soal, lalu setiap 60 detik.</p>}
+      {shots?.length > 0 && (
+        <>
+          <p className="text-xs text-slate-500 mb-3">{shots.length} foto, terbaru dulu. Foto dihapus otomatis 7 hari setelah diambil.</p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-h-[60vh] overflow-y-auto">
+            {shots.map((ts) => (
+              <figure key={ts}>
+                <CamPhoto attemptId={row.attemptId} ts={ts} className="w-full aspect-[4/3] rounded-lg" />
+                <figcaption className="text-xs text-slate-500 mt-1">{jam(ts)}</figcaption>
+              </figure>
+            ))}
+          </div>
+        </>
+      )}
+    </Modal>
+  )
+}
 
 const ST = { belum_mulai: ['slate', 'Belum mulai'], sedang_mengerjakan: ['amber', 'Sedang mengerjakan'], selesai: ['green', 'Selesai'] }
 
 export default function Monitor() {
   const { examId, picker, loaded } = useExamPicker()
   const [rows, setRows] = useState([])
+  const [gallery, setGallery] = useState(null)
 
   const load = useCallback(() => examId && api(`/admin/exams/${examId}/monitor`).then(setRows), [examId])
   useEffect(() => {
@@ -38,10 +82,18 @@ export default function Monitor() {
       </div>
       <Card className="overflow-x-auto p-0">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left"><tr>{['Peserta', 'Status', 'Mulai', 'Terakhir aktif', 'Peringatan'].map((h) => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}</tr></thead>
+          <thead className="bg-slate-50 text-left"><tr>{['Kamera', 'Peserta', 'Status', 'Mulai', 'Terakhir aktif', 'Peringatan'].map((h) => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}</tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.userId} className="border-t">
+                <td className="px-4 py-2">
+                  {r.kameraTerakhir
+                    ? <button onClick={() => setGallery(r)} title="Lihat semua foto kamera" className="block rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
+                        <CamPhoto attemptId={r.attemptId} ts={r.kameraTerakhir} className="w-20 h-15 rounded-lg" />
+                        <span className="block text-[11px] text-slate-500 mt-0.5">{jam(r.kameraTerakhir)} · {r.jumlahFoto} foto</span>
+                      </button>
+                    : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><CameraOff size={14} /> belum ada foto</span>}
+                </td>
                 <td className="px-4 py-2">{r.nama}<div className="text-xs text-slate-500 font-mono">{r.username}</div></td>
                 <td className="px-4 py-2">
                   <div className="flex items-center gap-2">
@@ -54,12 +106,15 @@ export default function Monitor() {
                 <td className="px-4 py-2 space-x-1">
                   {r.terputus && <Badge color="red">koneksi terputus</Badge>}
                   {r.keluarHalaman > 0 && <Badge color="amber">keluar halaman ×{r.keluarHalaman}</Badge>}
+                  {r.kameraMati > 0 && <Badge color="red">kamera mati ×{r.kameraMati}</Badge>}
+                  {r.status === 'sedang_mengerjakan' && !r.terputus && r.waktuMulai && Date.now() - new Date(r.waktuMulai).getTime() > 150000 && (!r.kameraTerakhir || Date.now() - r.kameraTerakhir > 150000) && <Badge color="red">foto kamera tidak masuk</Badge>}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </Card>
+      {gallery && <CamGallery row={gallery} onClose={() => setGallery(null)} />}
     </div>
   )
 }

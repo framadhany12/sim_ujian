@@ -5,3 +5,4 @@ dist/
 *.log
 .ngodingpakeai/pending.json
 .ngodingpakeai/summaries.json
+backend/uploads/

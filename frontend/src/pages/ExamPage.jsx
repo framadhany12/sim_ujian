@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Flag, ChevronLeft, ChevronRight, Send, X, CheckCircle2, Check } from 'lucide-react'
+import { Flag, ChevronLeft, ChevronRight, Send, X, CheckCircle2, Check, Camera } from 'lucide-react'
 import ExamTimer from '../components/ExamTimer.jsx'
 import Logo from '../components/Logo.jsx'
 import { api } from '../api.js'
 import useExamLock from '../components/useExamLock.js'
 import Watermark from '../components/Watermark.jsx'
+import useCamera from '../components/useCamera.js'
 import { useAuth } from '../auth.jsx'
 
 const LETTERS = 'ABCDE'
@@ -44,7 +45,9 @@ export default function ExamPage() {
     return () => clearInterval(hb)
   }, [data, submitted, post])
 
-  const lock = useExamLock(!!data && !submitted, post)
+  const cam = useCamera(!!data && !submitted, attemptId, post)
+  // Dialog izin kamera di HP bisa memicu blur; jangan dihitung sebagai pindah tab
+  const lock = useExamLock(!!data && !submitted && cam.status !== 'meminta', post)
 
   const save = useCallback(async (qid, patch, delay = 0) => {
     clearTimeout(timers.current[qid])
@@ -180,6 +183,8 @@ export default function ExamPage() {
       </div>
 
       {user && <Watermark lines={[user.nama, user.username, new Date().toLocaleDateString('id-ID')]} />}
+      <video ref={cam.videoRef} muted playsInline aria-label="Pratinjau kamera Anda"
+        className={`fixed bottom-3 left-3 z-30 w-24 sm:w-32 aspect-[4/3] object-cover rounded-xl border-2 border-white shadow-lg bg-blue-950 -scale-x-100 ${cam.status === 'aktif' ? '' : 'invisible'}`} />
       {lock.hidden && <div className="fixed inset-0 z-40 bg-blue-950" />}
       {(!lock.fullscreen || lock.warning) && (
         <div role="alertdialog" className="fixed inset-0 z-50 bg-blue-950/95 grid place-items-center p-4">
@@ -190,6 +195,20 @@ export default function ExamPage() {
             <button onClick={() => { lock.enterFullscreen(); lock.dismiss() }} className="mt-5 px-5 py-2.5 rounded-xl bg-amber-400 text-blue-950 font-bold hover:bg-amber-300">
               {lock.fullscreen ? 'Saya mengerti, lanjutkan' : 'Masuk layar penuh'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {cam.status !== 'aktif' && (
+        <div role="alertdialog" aria-labelledby="cam-title" className="fixed inset-0 z-[60] bg-blue-950 grid place-items-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full text-center">
+            <Camera className="mx-auto mb-3 text-blue-700" size={32} />
+            <h2 id="cam-title" className="font-extrabold text-xl text-blue-950 mb-2">{cam.status === 'meminta' ? 'Mengaktifkan kamera…' : 'Kamera wajib aktif'}</h2>
+            <p className="text-sm text-slate-600">{cam.status === 'meminta' ? 'Jika browser bertanya, pilih Izinkan agar kamera bisa dipakai selama ujian.' : cam.error}</p>
+            <p className="text-xs text-slate-500 mt-2">Soal disembunyikan sampai kamera aktif. Waktu ujian tetap berjalan.</p>
+            {cam.status !== 'meminta' && (
+              <button onClick={cam.start} className="mt-5 px-5 py-2.5 rounded-xl bg-amber-400 text-blue-950 font-bold hover:bg-amber-300">Aktifkan kamera</button>
+            )}
           </div>
         </div>
       )}

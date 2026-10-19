@@ -4,6 +4,7 @@ import { ClipboardList, CheckCircle2, TrendingUp, Timer, Play, Lock, Clock3, Inf
 import { api } from '../api.js'
 import { Button, Card, Modal, Input, ErrorText } from '../components/ui.jsx'
 import { useAuth } from '../auth.jsx'
+import { openCamera, cameraError } from '../components/useCamera.js'
 
 const fmtTime = (d) => new Date(d).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
 
@@ -36,6 +37,9 @@ export default function Jadwal() {
 
   const start = async () => {
     setError('')
+    // Kamera wajib: pastikan izin & perangkat tersedia sebelum waktu ujian mulai berjalan
+    try { (await openCamera()).getTracks().forEach((t) => t.stop()) }
+    catch (err) { setError(cameraError(err)); return }
     try { const d = await api(`/me/exams/${pick.id}/start`, { method: 'POST', body: { token } }); nav(`/ujian/${d.attemptId}`) }
     catch (err) { setError(err.message) }
   }
@@ -114,6 +118,7 @@ export default function Jadwal() {
           <div className="text-sm text-slate-600 whitespace-pre-wrap mb-4 bg-slate-50 rounded-xl p-3">
             {pick.petunjuk || `• Waktu pengerjaan ${pick.durasiMenit} menit dan berjalan di server.\n• Jangan keluar dari halaman ujian; aktivitas Anda dipantau.\n• Jawaban tersimpan otomatis. Kirim jawaban sebelum waktu habis.`}
           </div>
+          <p className="text-sm bg-blue-50 text-blue-900 rounded-xl px-3 py-2 mb-4">Ujian ini memakai kamera. Foto wajah Anda diambil setiap 60 detik untuk pengawasan dan dihapus otomatis setelah 7 hari. Saat menekan Buka soal, izinkan akses kamera.</p>
           <Input label="Token ujian (dari Admin)" value={token} onChange={(e) => setToken(e.target.value)} autoFocus />
           <ErrorText>{error}</ErrorText>
           <div className="flex justify-end gap-2 mt-4"><Button variant="ghost" onClick={() => setPick(null)}>Batal</Button><Button variant="accent" onClick={start} disabled={!token.trim()}>Buka soal</Button></div>

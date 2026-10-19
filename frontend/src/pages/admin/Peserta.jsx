@@ -45,9 +45,10 @@ export default function Peserta() {
   const [tab, setTab] = useState('semua')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
+  const [selected, setSelected] = useState(() => new Set())
   const fileRef = useRef()
 
-  const load = () => { api('/admin/peserta').then(setList); api('/admin/groups').then(setGroups) }
+  const load = () => { api('/admin/peserta').then(setList); api('/admin/groups').then(setGroups); setSelected(new Set()) }
   useEffect(() => { load() }, [])
   useEffect(() => { setPage(1) }, [q, filterGroup, tab])
 
@@ -62,6 +63,10 @@ export default function Peserta() {
     (!q || `${u.namaLengkap} ${u.username} ${u.email ?? ''}`.toLowerCase().includes(q.toLowerCase()))), [list, filterGroup, q, tab])
   const pages = Math.max(1, Math.ceil(shown.length / PER_PAGE))
   const rows = shown.slice((page - 1) * PER_PAGE, page * PER_PAGE)
+  const pageAllSelected = rows.length > 0 && rows.every((u) => selected.has(u.id))
+  const allShownSelected = shown.length > 0 && shown.every((u) => selected.has(u.id))
+  const toggleOne = (id) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const togglePage = () => setSelected((s) => { const n = new Set(s); rows.forEach((u) => (pageAllSelected ? n.delete(u.id) : n.add(u.id))); return n })
 
   const create = async (e) => {
     e.preventDefault(); setError('')
@@ -120,6 +125,13 @@ export default function Peserta() {
     if (!(await confirmDialog({ title: 'Hapus peserta?', message: `Peserta ${u.namaLengkap} akan dihapus beserta seluruh data pengerjaannya.`, confirmText: 'Ya, hapus' }))) return
     await api(`/admin/peserta/${u.id}`, { method: 'DELETE' }); load()
   }
+  const removeSelected = async () => {
+    const n = selected.size
+    if (!(await confirmDialog({ title: `Hapus ${n} peserta?`, message: `${n} peserta terpilih akan dihapus beserta seluruh data pengerjaannya. Tindakan ini tidak bisa dibatalkan.`, confirmText: `Ya, hapus ${n} peserta` }))) return
+    setBusy(true)
+    try { await api('/admin/peserta/bulk-delete', { method: 'POST', body: { ids: [...selected] } }); load() }
+    catch (err) { alert(err.message) } finally { setBusy(false) }
+  }
   const GroupOptions = () => <>{groups.map((g) => <option key={g.id} value={g.id}>{g.nama}</option>)}</>
 
   const tabs = [['semua', 'Semua'], ['aktif', 'Aktif'], ['nonaktif', 'Nonaktif'], ['reset', 'Minta reset']]
@@ -163,15 +175,26 @@ export default function Peserta() {
           </div>
         </div>
 
+        {selected.size > 0 && (
+          <div className="px-5 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 bg-blue-50 border-b border-line text-sm">
+            <b className="text-blue-950">{selected.size} peserta dipilih</b>
+            {!allShownSelected && <button onClick={() => setSelected(new Set(shown.map((u) => u.id)))} className="text-blue-700 font-semibold hover:underline">Pilih semua {shown.length} hasil filter</button>}
+            <button onClick={() => setSelected(new Set())} className="text-slate-600 hover:underline">Batal pilih</button>
+            <span className="flex-1" />
+            <Button variant="danger" disabled={busy} onClick={removeSelected}><Trash2 size={15} /> {busy ? 'Menghapus…' : 'Hapus terpilih'}</Button>
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-page/70 text-left text-[11px] uppercase tracking-wider text-slate-500">
-              <tr><th className="px-5 py-3 font-semibold">Peserta</th><th className="px-4 py-3 font-semibold">Username</th><th className="px-4 py-3 font-semibold">Grup</th><th className="px-4 py-3 font-semibold">Akun</th><th className="px-5 py-3 font-semibold text-right">Aksi</th></tr>
+              <tr><th className="pl-5 py-3 w-8"><input type="checkbox" aria-label="Pilih semua di halaman ini" checked={pageAllSelected} onChange={togglePage} className="w-4 h-4 accent-blue-700 align-middle" /></th><th className="px-4 py-3 font-semibold">Peserta</th><th className="px-4 py-3 font-semibold">Username</th><th className="px-4 py-3 font-semibold">Grup</th><th className="px-4 py-3 font-semibold">Akun</th><th className="px-5 py-3 font-semibold text-right">Aksi</th></tr>
             </thead>
             <tbody className="divide-y divide-line">
               {rows.map((u) => (
-                <tr key={u.id} className="hover:bg-blue-50/40 transition">
-                  <td className="px-5 py-3">
+                <tr key={u.id} className={`transition ${selected.has(u.id) ? 'bg-blue-50/70' : 'hover:bg-blue-50/40'}`}>
+                  <td className="pl-5 py-3"><input type="checkbox" aria-label={`Pilih ${u.namaLengkap}`} checked={selected.has(u.id)} onChange={() => toggleOne(u.id)} className="w-4 h-4 accent-blue-700 align-middle" /></td>
+                  <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
                       <span className={`grid place-items-center w-10 h-10 rounded-full text-sm font-bold shrink-0 ${avatarClass(u.namaLengkap)}`}>{initials(u.namaLengkap)}</span>
                       <div className="min-w-0"><p className="font-semibold text-blue-950 truncate">{u.namaLengkap}</p><p className="text-xs text-slate-500 truncate">{u.email || '—'}</p></div>
@@ -197,7 +220,7 @@ export default function Peserta() {
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-14 text-center text-slate-500"><Users className="mx-auto mb-2 text-slate-300" size={32} />Tidak ada peserta yang cocok.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-14 text-center text-slate-500"><Users className="mx-auto mb-2 text-slate-300" size={32} />Tidak ada peserta yang cocok.</td></tr>
               )}
             </tbody>
           </table>

@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import multer from 'multer'
+import { listShots, shotFile, removeAttemptShots } from '../camera.js'
 import XLSX from 'xlsx'
 import { readTable, buildWorkbook, sendBuffer, sendCsv, parseBool, parseNumber, parseTipe, parseBenarSalah, SheetError, MAX_ROWS } from '../sheets.js'
 import { effBobot, prisma, wrap, audit, randomPassword, randomToken, gradeAttempt, notifyMonitor } from '../lib.js'
@@ -305,6 +306,15 @@ r.delete('/peserta/:id', wrap(async (req, res) => {
   await prisma.user.delete({ where: { id: user.id } })
   await audit(req.user.id, 'hapus_peserta', user.username)
   res.json({ ok: true })
+}))
+
+r.post('/peserta/bulk-delete', wrap(async (req, res) => {
+  const ids = [...new Set((req.body?.ids ?? []).map(Number).filter(Number.isInteger))]
+  if (!ids.length) return res.status(400).json({ message: 'Tidak ada peserta yang dipilih' })
+  const users = await prisma.user.findMany({ where: { id: { in: ids }, role: 'peserta' }, select: { id: true, username: true } })
+  await prisma.user.deleteMany({ where: { id: { in: users.map((u) => u.id) } } })
+  await audit(req.user.id, 'hapus_peserta', `${users.length} peserta: ${users.map((u) => u.username).join(', ')}`.slice(0, 180))
+  res.json({ deleted: users.length })
 }))
 
 /* ───────────── Ujian: jadwal, token & grup ───────────── */
@@ -687,17 +697,31 @@ r.get('/exams/:id/monitor', wrap(async (req, res) => {
     prisma.examAttempt.findMany({ where: { examId }, include: { logs: { select: { event: true } } } }),
   ])
   const byUser = new Map(attempts.map((a) => [a.userId, a]))
+  const shots = new Map(await Promise.all(attempts.map(async (a) => [a.id, await listShots(a.id)])))
   const now = Date.now()
   res.json(peserta.map((u) => {
     const a = byUser.get(u.id)
     const keluar = a?.logs.filter((l) => ['keluar_halaman', 'pindah_tab'].includes(l.event)).length ?? 0
     const terputus = a?.status === 'sedang_mengerjakan' && a.lastSeen && now - a.lastSeen.getTime() > 45000
+    const s = a ? shots.get(a.id) : []
     return {
-      userId: u.id, nama: u.profile?.namaLengkap ?? u.username, username: u.username, grup: u.profile?.group?.nama ?? null,
+      userId: u.id, attemptId: a?.id ?? null, nama: u.profile?.namaLengkap ?? u.username, username: u.username, grup: u.profile?.group?.nama ?? null,
       status: a?.status ?? 'belum_mulai', waktuMulai: a?.waktuMulai ?? null, lastSeen: a?.lastSeen ?? null,
       keluarHalaman: keluar, terputus: !!terputus,
+      kameraTerakhir: s[0] ?? null, jumlahFoto: s.length,
+      kameraMati: a?.logs.filter((l) => l.event === 'kamera_mati').length ?? 0,
     }
   }))
+}))
+
+// Foto kamera satu pengerjaan: daftar waktu, lalu berkas per foto
+r.get('/attempts/:id/camera', wrap(async (req, res) => {
+  res.json({ shots: await listShots(+req.params.id) })
+}))
+r.get('/attempts/:id/camera/:ts', wrap(async (req, res) => {
+  if (!/^\d+$/.test(req.params.ts)) return res.status(400).json({ message: 'Foto tidak valid' })
+  res.set('Cache-Control', 'private, max-age=604800')
+  res.sendFile(shotFile(+req.params.id, req.params.ts), (err) => { if (err && !res.headersSent) res.status(404).json({ message: 'Foto tidak ditemukan' }) })
 }))
 
 // Reset pengerjaan peserta → kembali "belum mulai" (jawaban & log attempt ikut terhapus) agar bisa mengulang
@@ -706,6 +730,7 @@ r.post('/exams/:id/monitor/:userId/reset', wrap(async (req, res) => {
   const attempt = await prisma.examAttempt.findUnique({ where: { examId_userId: { examId, userId } }, include: { user: { include: { profile: true } } } })
   if (!attempt) return res.status(404).json({ message: 'Peserta belum memulai ujian ini' })
   await prisma.examAttempt.delete({ where: { id: attempt.id } })
+  await removeAttemptShots(attempt.id)
   await audit(req.user.id, 'reset_ujian', `${attempt.user.profile?.namaLengkap ?? attempt.user.username} pada ujian ${examId} (status sebelumnya: ${attempt.status})`)
   notifyMonitor(examId)
   res.json({ ok: true })
@@ -743,10 +768,14 @@ r.put('/answers/:id/nilai', wrap(async (req, res) => {
 
 /* ───────────── Rekap & laporan ───────────── */
 
-async function rekap(examId) {
+// from/to: batas waktu mulai pengerjaan (ISO, dihitung di zona waktu browser admin)
+async function rekap(examId, { from, to } = {}) {
   const exam = await prisma.exam.findUnique({ where: { id: examId } })
+  const range = {}
+  if (from && !isNaN(Date.parse(from))) range.gte = new Date(from)
+  if (to && !isNaN(Date.parse(to))) range.lt = new Date(to)
   const attempts = await prisma.examAttempt.findMany({
-    where: { examId }, include: { user: { include: { profile: { include: { group: true } } } } }, orderBy: { skorTotal: 'desc' },
+    where: { examId, ...(Object.keys(range).length && { waktuMulai: range }) }, include: { user: { include: { profile: { include: { group: true } } } } }, orderBy: { skorTotal: 'desc' },
   })
   return { exam, rows: attempts.map((a) => ({
     username: a.user.username, nama: a.user.profile?.namaLengkap ?? a.user.username, grup: a.user.profile?.group?.nama ?? '',
@@ -756,12 +785,12 @@ async function rekap(examId) {
 }
 
 r.get('/exams/:id/rekap', wrap(async (req, res) => {
-  const { exam, rows } = await rekap(+req.params.id)
+  const { exam, rows } = await rekap(+req.params.id, req.query)
   res.json({ judul: exam?.judul, nilaiKelulusan: exam ? Number(exam.nilaiKelulusan) : 0, rows })
 }))
 
 r.get('/exams/:id/report', wrap(async (req, res) => {
-  const { exam, rows } = await rekap(+req.params.id)
+  const { exam, rows } = await rekap(+req.params.id, req.query)
   const label = { lulus: 'Lulus', tidak_lulus: 'Tidak Lulus', belum: 'Belum dinilai' }
   sendSheet(res, rows.map((x, i) => ({
     No: i + 1, Username: x.username, Nama: x.nama, Grup: x.grup, Status: x.status,

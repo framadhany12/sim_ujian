@@ -16,6 +16,13 @@ export async function api(path, { method = 'GET', body, form } = {}) {
   return data
 }
 
+// Ambil berkas terlindungi (mis. foto kamera) sebagai object URL untuk <img>
+export async function blobUrl(path) {
+  const res = await fetch(BASE + '/api' + path, { headers: { Authorization: `Bearer ${getToken()}` } })
+  if (!res.ok) throw new Error('Gagal memuat berkas')
+  return URL.createObjectURL(await res.blob())
+}
+
 // Unduh berkas (xlsx/csv) dengan header Authorization
 export async function download(path, filename) {
   const res = await fetch(BASE + '/api' + path, { headers: { Authorization: `Bearer ${getToken()}` } })
