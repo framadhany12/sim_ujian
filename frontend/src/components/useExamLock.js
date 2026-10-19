@@ -2,6 +2,18 @@ import { useEffect, useState } from 'react'
 
 const BLOCKED_CTRL = ['c', 'v', 'x', 'a', 'p', 's', 'u']
 
+// Safari iPad hanya punya API berawalan webkit; Safari iPhone tidak punya Fullscreen API
+// untuk halaman sama sekali, jadi di sana layar penuh tidak diwajibkan.
+const root = () => document.documentElement
+const fsSupported = () => !!(root().requestFullscreen || root().webkitRequestFullscreen)
+const fsActive = () => !fsSupported() || !!(document.fullscreenElement || document.webkitFullscreenElement)
+const requestFs = () => {
+  try {
+    const p = root().requestFullscreen ? root().requestFullscreen() : root().webkitRequestFullscreen?.()
+    p?.catch?.(() => {})
+  } catch { /* ditolak browser */ }
+}
+
 // Mengunci halaman ujian: blok salin/tempel/klik kanan, deteksi pindah tab/jendela,
 // wajib layar penuh, dan tutup isi halaman saat tombol screenshot ditekan.
 export default function useExamLock(active, report) {
@@ -37,7 +49,7 @@ export default function useExamLock(active, report) {
     const onVisible = () => { if (document.hidden) { setHidden(true); flag('pindah_tab', 'Anda berpindah tab/aplikasi. Pelanggaran dicatat dan dilaporkan ke pengawas.') } }
     const onBlur = onLeave('pindah_tab')
     const onFocus = () => { if (!document.hidden) setHidden(false) }
-    const onFs = () => setFullscreen(!!document.fullscreenElement)
+    const onFs = () => setFullscreen(fsActive())
     const onBeforePrint = () => setHidden(true)
     const onAfterPrint = () => setHidden(false)
 
@@ -48,17 +60,19 @@ export default function useExamLock(active, report) {
     document.addEventListener('keyup', onKeyUp, true)
     document.addEventListener('visibilitychange', onVisible)
     document.addEventListener('fullscreenchange', onFs)
+    document.addEventListener('webkitfullscreenchange', onFs)
     window.addEventListener('blur', onBlur)
     window.addEventListener('focus', onFocus)
     window.addEventListener('beforeprint', onBeforePrint)
     window.addEventListener('afterprint', onAfterPrint)
-    setFullscreen(!!document.fullscreenElement)
+    setFullscreen(fsActive())
     return () => {
       pairs.forEach(([ev, fn]) => document.removeEventListener(ev, fn))
       document.removeEventListener('keydown', onKey, true)
       document.removeEventListener('keyup', onKeyUp, true)
       document.removeEventListener('visibilitychange', onVisible)
       document.removeEventListener('fullscreenchange', onFs)
+      document.removeEventListener('webkitfullscreenchange', onFs)
       window.removeEventListener('blur', onBlur)
       window.removeEventListener('focus', onFocus)
       window.removeEventListener('beforeprint', onBeforePrint)
@@ -66,7 +80,7 @@ export default function useExamLock(active, report) {
     }
   }, [active, report])
 
-  const enterFullscreen = () => document.documentElement.requestFullscreen?.().catch(() => {})
+  const enterFullscreen = requestFs
   const dismiss = () => { setWarning(''); setHidden(false) }
   return { violations, warning, hidden, fullscreen, enterFullscreen, dismiss }
 }

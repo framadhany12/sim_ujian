@@ -5,6 +5,8 @@ import ExamTimer from '../components/ExamTimer.jsx'
 import Logo from '../components/Logo.jsx'
 import { api } from '../api.js'
 import useExamLock from '../components/useExamLock.js'
+import Watermark from '../components/Watermark.jsx'
+import { useAuth } from '../auth.jsx'
 
 const LETTERS = 'ABCDE'
 const TIPE = { pilihan_ganda: 'Pilihan ganda', benar_salah: 'Benar / Salah', esai: 'Esai' }
@@ -12,6 +14,7 @@ const TIPE = { pilihan_ganda: 'Pilihan ganda', benar_salah: 'Benar / Salah', esa
 export default function ExamPage() {
   const { attemptId } = useParams()
   const nav = useNavigate()
+  const { user } = useAuth()
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [index, setIndex] = useState(0)
@@ -176,6 +179,7 @@ export default function ExamPage() {
         </div>
       </div>
 
+      {user && <Watermark lines={[user.nama, user.username, new Date().toLocaleDateString('id-ID')]} />}
       {lock.hidden && <div className="fixed inset-0 z-40 bg-blue-950" />}
       {(!lock.fullscreen || lock.warning) && (
         <div role="alertdialog" className="fixed inset-0 z-50 bg-blue-950/95 grid place-items-center p-4">
