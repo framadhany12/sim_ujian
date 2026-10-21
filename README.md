@@ -20,6 +20,10 @@ npm run dev                         # API :4000 + web :5173
 Admin awal (seed): `admin` / `admin12345` — ganti lewat menu **Ganti password**.
 Bila login macet, pastikan tidak ada dua server Vite berjalan sekaligus (matikan semua proses `node`, jalankan ulang).
 
+## Online lewat Cloudflare (gratis)
+
+Klik dua kali `hosting-cloudflare.bat` (perlu `cloudflared` terpasang dan MySQL XAMPP menyala, serta `npm run dev` dalam keadaan mati). Skrip ini mem-build frontend, menjalankan server di :4000, membuka Cloudflare Quick Tunnel, lalu menampilkan alamat `https://….trycloudflare.com` dan menyalinnya ke clipboard. Alamat itu berganti setiap kali skrip dijalankan, dan aplikasi hanya online selama jendela skrip terbuka dan komputer menyala.
+
 ## Struktur
 
 ```
