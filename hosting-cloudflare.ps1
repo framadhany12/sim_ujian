@@ -58,6 +58,19 @@ try {
   }
   if (-not $url) { throw "Alamat tunnel tidak muncul dalam 60 detik. Lihat log: $tunnelLog" }
 
+  # Jangan buka alamat sebelum DNS publik siap: DNS jaringan lokal akan menyimpan
+  # jawaban "domain tidak ada" selama beberapa menit kalau ditanya terlalu cepat.
+  Write-Host 'Menunggu alamat aktif di DNS...'
+  $hostName = ([Uri]$url).Host
+  for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Seconds 3
+    try {
+      $r = Invoke-RestMethod "https://dns.google/resolve?name=$hostName&type=A" -TimeoutSec 5
+      if ($r.Answer) { break }
+    } catch {}
+  }
+  Start-Sleep -Seconds 5
+
   try { Set-Clipboard $url } catch {}
   Write-Host ''
   Write-Host '============================================================' -ForegroundColor Green
