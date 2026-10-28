@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Plus, X, ChevronUp, ChevronDown, Search, Save, Wand2, AlertTriangle, CheckCircle2, ListPlus } from 'lucide-react'
+import { ArrowLeft, Plus, X, ChevronUp, ChevronDown, Search, Save, Wand2, AlertTriangle, CheckCircle2, ListPlus, Tags } from 'lucide-react'
 import { api } from '../../api.js'
 import { Button, Card, ErrorText } from '../../components/ui.jsx'
 import { confirmDialog } from '../../components/Confirm.jsx'
@@ -43,11 +43,21 @@ export default function SusunSoal() {
   const chosen = useMemo(() => new Set(sel.map((s) => s.id)), [sel])
   const available = useMemo(() => bank.items.filter((x) =>
     !chosen.has(x.id) && (!tipe || x.tipe === tipe) && (!kategori || x.kategori === kategori) && (!q || x.teksSoal.toLowerCase().includes(q.toLowerCase()))), [bank, chosen, q, tipe, kategori])
-  const total = r2(sel.reduce((s, x) => s + (Number(x.bobot) || 0), 0))
+  // Soal yang benar-benar dikerjakan tiap peserta (bila ada batas jumlah soal acak)
+  const n = sel.length && exam?.jumlahSoalTampil && exam.jumlahSoalTampil < sel.length ? exam.jumlahSoalTampil : sel.length
+  const katInfo = useMemo(() => bank.kategori.map((nama) => ({
+    nama,
+    total: bank.items.filter((x) => x.kategori === nama).length,
+    sisa: bank.items.filter((x) => x.kategori === nama && !chosen.has(x.id)),
+  })), [bank, chosen])
+  const sumAll = r2(sel.reduce((s, x) => s + (Number(x.bobot) || 0), 0))
+  const total = sel.length ? r2((sumAll / sel.length) * n) : 0
+  const acak = n < sel.length
 
   const toItem = (x) => ({ id: x.id, tipe: x.tipe, teksSoal: x.teksSoal, kategori: x.kategori, bobot: x.bobot, bobotBawaan: x.bobot })
   const add = (x) => { setSel([...sel, toItem(x)]); setSaved(false) }
   const addAll = () => { setSel([...sel, ...available.map(toItem)]); setSaved(false) }
+  const addKategori = (k) => { setSel([...sel, ...k.sisa.map(toItem)]); setSaved(false) }
   const remove = (sid) => { setSel(sel.filter((s) => s.id !== sid)); setSaved(false) }
   const move = (i, d) => {
     const j = i + d; if (j < 0 || j >= sel.length) return
@@ -56,8 +66,8 @@ export default function SusunSoal() {
   const setBobot = (sid, v) => { setSel(sel.map((s) => (s.id === sid ? { ...s, bobot: v } : s))); setSaved(false) }
   const normalize100 = () => {
     if (!sel.length) return
-    const each = Math.floor(10000 / sel.length) / 100
-    setSel(sel.map((s, i) => ({ ...s, bobot: i === sel.length - 1 ? r2(100 - each * (sel.length - 1)) : each }))); setSaved(false)
+    const each = Math.floor(10000 / n) / 100
+    setSel(sel.map((s, i) => ({ ...s, bobot: !acak && i === sel.length - 1 ? r2(100 - each * (sel.length - 1)) : each }))); setSaved(false)
   }
   const applyAll = () => { if (Number(samaBobot) > 0) { setSel(sel.map((s) => ({ ...s, bobot: Number(samaBobot) }))); setSaved(false) } }
   const resetBawaan = () => { setSel(sel.map((s) => ({ ...s, bobot: s.bobotBawaan }))); setSaved(false) }
@@ -94,19 +104,40 @@ export default function SusunSoal() {
       </div>
       <ErrorText>{error}</ErrorText>
 
-      <div className="grid grid-cols-3 gap-3 max-w-xl">
+      <div className={`grid ${acak ? 'grid-cols-4' : 'grid-cols-3'} gap-3 max-w-2xl`}>
         <Card className="!p-4"><p className="text-[11px] uppercase tracking-wider text-slate-400">Jumlah soal</p><p className="text-2xl font-extrabold text-blue-950">{sel.length}</p></Card>
-        <Card className={`!p-4 ${total === 100 ? '!border-emerald-300' : ''}`}><p className="text-[11px] uppercase tracking-wider text-slate-400">Total bobot</p><p className={`text-2xl font-extrabold ${total === 100 ? 'text-emerald-600' : 'text-blue-950'}`}>{total}</p></Card>
+        {acak && <Card className="!p-4"><p className="text-[11px] uppercase tracking-wider text-slate-400">Dikerjakan/peserta</p><p className="text-2xl font-extrabold text-blue-950">{n}</p></Card>}
+        <Card className={`!p-4 ${Math.abs(total - 100) < 0.5 ? '!border-emerald-300' : ''}`}><p className="text-[11px] uppercase tracking-wider text-slate-400">{acak ? 'Total bobot/peserta' : 'Total bobot'}</p><p className={`text-2xl font-extrabold ${Math.abs(total - 100) < 0.5 ? 'text-emerald-600' : 'text-blue-950'}`}>{total}</p></Card>
         <Card className="!p-4"><p className="text-[11px] uppercase tracking-wider text-slate-400">Rata-rata</p><p className="text-2xl font-extrabold text-blue-950">{sel.length ? r2(total / sel.length) : 0}</p></Card>
       </div>
-      {total !== 100 && sel.length > 0 && <p className="flex items-center gap-2 text-sm text-amber-800 bg-amber-50 rounded-xl px-3 py-2 max-w-xl"><AlertTriangle size={15} /> Total bobot {total}. Nilai akhir tetap dihitung sebagai persen dari total bobot, tetapi total 100 lebih mudah dibaca.</p>}
+      {Math.abs(total - 100) >= 0.5 && sel.length > 0 && <p className="flex items-center gap-2 text-sm text-amber-800 bg-amber-50 rounded-xl px-3 py-2 max-w-xl"><AlertTriangle size={15} /> Total bobot {acak ? `tiap peserta (rata-rata ${n} soal)` : ''} {total}. Nilai akhir tetap dihitung sebagai persen dari bobot soal yang dikerjakan peserta, tetapi total 100 lebih mudah dibaca.</p>}
+
+      <p className="text-sm rounded-xl px-3 py-2 max-w-3xl bg-blue-50 text-blue-900">
+        {exam.jumlahSoalTampil
+          ? <>Setiap peserta mendapat <b>{Math.min(exam.jumlahSoalTampil, sel.length || exam.jumlahSoalTampil)} soal acak</b> dari {sel.length} soal di bawah ini{sel.length && exam.jumlahSoalTampil > sel.length ? ' (semua soal, karena jumlahnya kurang dari batas)' : ''}. Ubah batasnya di <Link to="/admin/ujian" className="underline font-semibold">Ujian Tersedia → Ubah</Link>.</>
+          : <>Semua peserta mendapat seluruh soal di bawah ini. Untuk membagikan soal acak dari kumpulan ini, isi <b>Jumlah soal per peserta</b> di <Link to="/admin/ujian" className="underline font-semibold">Ujian Tersedia → Ubah</Link>.</>}
+      </p>
 
       <div className="grid xl:grid-cols-2 gap-4 items-start">
         {/* Bank soal */}
         <Card className="!p-0 overflow-hidden">
           <div className="p-4 border-b border-line space-y-3">
             <div className="flex items-center justify-between"><h3 className="font-bold text-blue-950">Bank soal <span className="text-slate-400 font-normal">({available.length} tersedia)</span></h3>
-              <Button variant="ghost" className="!py-1.5" disabled={!available.length} onClick={addAll}><ListPlus size={15} /> Tambah semua</Button></div>
+              <Button variant="ghost" className="!py-1.5" disabled={!available.length} onClick={addAll}><ListPlus size={15} /> {kategori || tipe || q ? `Tambah ${available.length} hasil filter` : 'Tambah semua'}</Button></div>
+            {katInfo.length > 0 && (
+              <div className="rounded-xl bg-page p-3">
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 mb-2"><Tags size={13} /> Ambil satu kategori sekaligus</p>
+                <div className="flex flex-wrap gap-2">
+                  {katInfo.map((k) => (
+                    <button key={k.nama} disabled={!k.sisa.length} onClick={() => addKategori(k)}
+                      title={k.sisa.length ? `Tambahkan ${k.sisa.length} soal kategori ${k.nama}` : 'Semua soal kategori ini sudah dipilih'}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-3 py-1.5 text-xs font-medium text-blue-950 hover:border-blue-500 hover:bg-blue-50 disabled:opacity-40 disabled:hover:border-line disabled:hover:bg-white">
+                      <Plus size={12} /> {k.nama} <span className="text-slate-400">{k.sisa.length}/{k.total}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               <div className="relative flex-1 min-w-40"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari soal…" className="w-full border border-slate-300 rounded-xl pl-8 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>

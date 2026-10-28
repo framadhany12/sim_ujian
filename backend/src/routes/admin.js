@@ -483,11 +483,43 @@ r.get('/questions', wrap(async (req, res) => {
     ...(kategori ? { kategori: String(kategori) } : {}),
     ...(q ? { teksSoal: { contains: String(q) } } : {}),
   }
-  const [items, cats] = await Promise.all([
+  const [items, cats, registered] = await Promise.all([
     prisma.question.findMany({ where, include: { options: true, _count: { select: { examLinks: true } } }, orderBy: { id: 'desc' } }),
     prisma.question.findMany({ where: { kategori: { not: null } }, distinct: ['kategori'], select: { kategori: true }, orderBy: { kategori: 'asc' } }),
+    prisma.questionCategory.findMany({ select: { nama: true } }),
   ])
-  res.json({ items: items.map(serializeQ), kategori: cats.map((c) => c.kategori) })
+  const daftarKategori = [...new Set([...cats.map((c) => c.kategori), ...registered.map((c) => c.nama)])].sort((a, b) => a.localeCompare(b))
+  res.json({ items: items.map(serializeQ), kategori: daftarKategori })
+}))
+
+// Kategori: daftar terdaftar + kategori yang hanya muncul dari soal, beserta jumlah soalnya
+r.get('/question-categories', wrap(async (req, res) => {
+  const [used, registered] = await Promise.all([
+    prisma.question.groupBy({ by: ['kategori'], where: { kategori: { not: null } }, _count: { _all: true } }),
+    prisma.questionCategory.findMany({ select: { nama: true } }),
+  ])
+  const count = new Map(used.map((u) => [u.kategori, u._count._all]))
+  const names = [...new Set([...count.keys(), ...registered.map((c) => c.nama)])].sort((a, b) => a.localeCompare(b))
+  res.json({ items: names.map((nama) => ({ nama, jumlahSoal: count.get(nama) ?? 0 })) })
+}))
+
+r.post('/question-categories', wrap(async (req, res) => {
+  const nama = String(req.body?.nama ?? '').trim().slice(0, 80)
+  if (!nama) return res.status(400).json({ message: 'Nama kategori wajib diisi' })
+  const exists = await prisma.questionCategory.findFirst({ where: { nama } }) ?? await prisma.question.findFirst({ where: { kategori: nama }, select: { id: true } })
+  if (exists) return res.status(409).json({ message: 'Kategori sudah ada' })
+  await prisma.questionCategory.create({ data: { nama } })
+  await audit(req.user.id, 'tambah_kategori_soal', nama)
+  res.status(201).json({ nama, jumlahSoal: 0 })
+}))
+
+// Hanya kategori yang tidak dipakai soal manapun yang boleh dihapus
+r.delete('/question-categories', wrap(async (req, res) => {
+  const nama = String(req.query.nama ?? '').trim()
+  if (await prisma.question.count({ where: { kategori: nama } })) return res.status(409).json({ message: 'Kategori masih dipakai soal, tidak dapat dihapus.' })
+  await prisma.questionCategory.deleteMany({ where: { nama } })
+  await audit(req.user.id, 'hapus_kategori_soal', nama)
+  res.json({ ok: true })
 }))
 
 r.post('/questions', wrap(async (req, res) => {
@@ -561,6 +593,17 @@ r.delete('/questions/:qid', wrap(async (req, res) => {
   await prisma.question.delete({ where: { id } })
   await audit(req.user.id, 'hapus_soal', 'soal ' + id)
   res.json({ ok: true })
+}))
+
+// Hapus banyak soal sekaligus; soal yang sudah pernah dijawab peserta dilewati
+r.post('/questions/bulk-delete', wrap(async (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger))]
+  if (!ids.length) return res.status(400).json({ message: 'Pilih minimal satu soal' })
+  const answered = new Set((await prisma.answer.findMany({ where: { questionId: { in: ids } }, distinct: ['questionId'], select: { questionId: true } })).map((a) => a.questionId))
+  const deletable = ids.filter((id) => !answered.has(id))
+  const { count } = await prisma.question.deleteMany({ where: { id: { in: deletable } } })
+  await audit(req.user.id, 'hapus_soal_massal', `${count} soal`)
+  res.json({ deleted: count, skipped: answered.size })
 }))
 
 /* ── Impor / ekspor / template soal ── */

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Upload, Download, Eye, FileSpreadsheet, Search, Pencil, Trash2, Copy, ChevronLeft, ChevronRight, BookOpen, AlertTriangle, ListChecks, ToggleLeft, PenLine } from 'lucide-react'
+import { Plus, Upload, Download, Eye, FileSpreadsheet, Search, Pencil, Trash2, Copy, ChevronLeft, ChevronRight, BookOpen, Tags, X, AlertTriangle, ListChecks, ToggleLeft, PenLine } from 'lucide-react'
 import { api, download } from '../../api.js'
 import { Button, Input, Textarea, Select, Card, Modal, ErrorText } from '../../components/ui.jsx'
 import { confirmDialog } from '../../components/Confirm.jsx'
@@ -46,11 +46,16 @@ export default function Soal() {
   const [imp, setImp] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [picked, setPicked] = useState(() => new Set())
+  const [cats, setCats] = useState(null)
+  const [newCat, setNewCat] = useState('')
+  const [catError, setCatError] = useState('')
   const fileRef = useRef()
 
   const load = () => api('/admin/questions').then(setData)
   useEffect(() => { load() }, [])
   useEffect(() => { setPage(1) }, [q, tipe, kategori])
+  useEffect(() => { setPicked(new Set()) }, [q, tipe, kategori])
 
   const counts = useMemo(() => ({
     semua: data.items.length,
@@ -76,6 +81,31 @@ export default function Soal() {
       setForm(null); load()
     } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
+  const allPicked = shown.length > 0 && shown.every((x) => picked.has(x.id))
+  const toggleAll = () => setPicked(allPicked ? new Set() : new Set(shown.map((x) => x.id)))
+  const toggleOne = (id) => setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const removePicked = async () => {
+    const n = picked.size
+    if (!(await confirmDialog({ title: `Hapus ${n} soal?`, message: `${n} soal terpilih akan dihapus dari bank soal dan dilepas dari ujian yang memakainya. Soal yang sudah pernah dikerjakan peserta akan dilewati.`, confirmText: 'Ya, hapus semua' }))) return
+    try {
+      const d = await api('/admin/questions/bulk-delete', { method: 'POST', body: { ids: [...picked] } })
+      if (d.skipped) alert(`${d.deleted} soal dihapus. ${d.skipped} soal dilewati karena sudah pernah dikerjakan peserta.`)
+      setPicked(new Set()); load()
+    } catch (err) { alert(err.message) }
+  }
+
+  const loadCats = () => api('/admin/question-categories').then((d) => setCats(d.items))
+  const openCats = () => { setCatError(''); setNewCat(''); loadCats() }
+  const addCat = async (e) => {
+    e.preventDefault(); setCatError('')
+    try { await api('/admin/question-categories', { method: 'POST', body: { nama: newCat } }); setNewCat(''); loadCats(); load() }
+    catch (err) { setCatError(err.message) }
+  }
+  const removeCat = async (nama) => {
+    try { await api('/admin/question-categories?nama=' + encodeURIComponent(nama), { method: 'DELETE' }); loadCats(); load() }
+    catch (err) { setCatError(err.message) }
+  }
+
   const duplicate = async (x) => { await api(`/admin/questions/${x.id}/duplicate`, { method: 'POST' }); load() }
   const remove = async (x) => {
     const warn = x.jumlahUjian ? ` Soal ini dipakai di ${x.jumlahUjian} ujian dan akan dilepas dari ujian tersebut.` : ''
@@ -111,6 +141,7 @@ export default function Soal() {
           <Button variant="ghost" disabled={!data.items.length} onClick={() => download('/admin/questions/export?format=xlsx', 'bank-soal.xlsx')}><Download size={16} /> Ekspor</Button>
           <Button variant="ghost" onClick={() => fileRef.current.click()}><Upload size={16} /> Impor</Button>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={onFile} />
+          <Button variant="ghost" onClick={openCats}><Tags size={16} /> Kategori</Button>
           <Button onClick={() => { setError(''); setForm(blankQ()) }}><Plus size={16} /> Tambah Soal</Button>
         </div>
       </div>
@@ -135,16 +166,24 @@ export default function Soal() {
           </select>
           <span className="text-xs text-slate-400">{shown.length} soal</span>
         </div>
+        {picked.size > 0 && (
+          <div className="px-4 py-2.5 flex flex-wrap items-center gap-3 bg-blue-50 border-b border-line text-sm">
+            <span className="font-semibold text-blue-900">{picked.size} soal dipilih</span>
+            <Button variant="ghost" onClick={() => setPicked(new Set())}>Batal pilih</Button>
+            <button onClick={removePicked} className="ml-auto inline-flex items-center gap-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white px-3.5 py-2 text-sm font-semibold"><Trash2 size={15} /> Hapus terpilih</button>
+          </div>
+        )}
 
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-page/70 text-left text-[11px] uppercase tracking-wider text-slate-500">
-              <tr><th className="px-5 py-3 w-12">No</th><th className="px-4 py-3">Soal</th><th className="px-4 py-3">Tipe</th><th className="px-4 py-3">Kunci</th><th className="px-4 py-3 text-center">Bobot</th><th className="px-4 py-3 text-center">Dipakai</th><th className="px-5 py-3 text-right">Aksi</th></tr>
+              <tr><th className="pl-5 py-3 w-10"><input type="checkbox" checked={allPicked} onChange={toggleAll} disabled={!shown.length} title="Pilih semua hasil filter" className="accent-blue-700" /></th><th className="px-3 py-3 w-12">No</th><th className="px-4 py-3">Soal</th><th className="px-4 py-3">Tipe</th><th className="px-4 py-3">Kunci</th><th className="px-4 py-3 text-center">Bobot</th><th className="px-4 py-3 text-center">Dipakai</th><th className="px-5 py-3 text-right">Aksi</th></tr>
             </thead>
             <tbody className="divide-y divide-line">
               {rows.map((x, i) => (
-                <tr key={x.id} className="hover:bg-blue-50/40 transition align-top">
-                  <td className="px-5 py-3 text-slate-400">{(page - 1) * PER_PAGE + i + 1}</td>
+                <tr key={x.id} className={`hover:bg-blue-50/40 transition align-top ${picked.has(x.id) ? 'bg-blue-50/60' : ''}`}>
+                  <td className="pl-5 py-3"><input type="checkbox" checked={picked.has(x.id)} onChange={() => toggleOne(x.id)} className="accent-blue-700" /></td>
+                  <td className="px-3 py-3 text-slate-400">{(page - 1) * PER_PAGE + i + 1}</td>
                   <td className="px-4 py-3 max-w-lg">
                     <p className="text-blue-950 line-clamp-2">{x.teksSoal}</p>
                     {x.kategori && <span className="inline-block mt-1 text-[11px] font-medium rounded-md px-2 py-0.5 bg-page text-slate-600">{x.kategori}</span>}
@@ -163,7 +202,7 @@ export default function Soal() {
                   </td>
                 </tr>
               ))}
-              {rows.length === 0 && <tr><td colSpan={7} className="px-4 py-14 text-center text-slate-500"><BookOpen className="mx-auto mb-2 text-slate-300" size={32} />{data.items.length ? 'Tidak ada soal yang cocok.' : 'Bank soal masih kosong. Tambah soal atau impor dari Excel.'}</td></tr>}
+              {rows.length === 0 && <tr><td colSpan={8} className="px-4 py-14 text-center text-slate-500"><BookOpen className="mx-auto mb-2 text-slate-300" size={32} />{data.items.length ? 'Tidak ada soal yang cocok.' : 'Bank soal masih kosong. Tambah soal atau impor dari Excel.'}</td></tr>}
             </tbody>
           </table>
         </div>
@@ -223,6 +262,27 @@ export default function Soal() {
               <QuestionPreview q={form} />
             </aside>
           </form>
+        </Modal>
+      )}
+
+      {cats && (
+        <Modal title="Kategori Soal" onClose={() => setCats(null)}>
+          <form onSubmit={addCat} className="flex gap-2 mb-3">
+            <input value={newCat} onChange={(e) => setNewCat(e.target.value)} maxLength={80} placeholder="Nama kategori baru, mis. Matematika" className="flex-1 border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <Button disabled={!newCat.trim()}><Plus size={16} /> Tambah</Button>
+          </form>
+          <ErrorText>{catError}</ErrorText>
+          <ul className="border border-line rounded-xl divide-y divide-line max-h-72 overflow-y-auto text-sm">
+            {cats.map((c) => (
+              <li key={c.nama} className="flex items-center gap-3 px-3 py-2.5">
+                <span className="flex-1 text-blue-950">{c.nama}</span>
+                <span className="text-xs text-slate-400">{c.jumlahSoal} soal</span>
+                <button disabled={c.jumlahSoal > 0} onClick={() => removeCat(c.nama)} title={c.jumlahSoal > 0 ? 'Masih dipakai soal' : 'Hapus kategori'} className="grid place-items-center w-7 h-7 rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-30 disabled:hover:bg-transparent"><X size={15} /></button>
+              </li>
+            ))}
+            {cats.length === 0 && <li className="p-6 text-center text-slate-500">Belum ada kategori.</li>}
+          </ul>
+          <p className="text-xs text-slate-400 mt-3">Kategori yang sudah dipakai soal tidak bisa dihapus. Pilih kategori saat menambah atau mengubah soal.</p>
         </Modal>
       )}
 

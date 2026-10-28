@@ -218,3 +218,11 @@ model AttemptQuestion {
   @@id([attemptId, questionId])
   @@map("attempt_questions")
 }
+
+model QuestionCategory {
+  id        Int      @id @default(autoincrement())
+  nama      String   @unique @db.VarChar(80)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("question_categories")
+}

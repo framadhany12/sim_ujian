@@ -74,7 +74,7 @@ export default function Ujian() {
 
             <dl className="grid grid-cols-3 gap-2 text-sm border-y border-line py-3">
               <div><dt className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-slate-400"><Clock size={12} /> Durasi</dt><dd className="font-bold text-blue-950">{e.durasiMenit} menit</dd></div>
-              <div><dt className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-slate-400"><FileQuestion size={12} /> Soal · bobot</dt><dd className="font-bold text-blue-950">{e.jumlahSoal} butir · {e.totalBobot}</dd></div>
+              <div><dt className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-slate-400"><FileQuestion size={12} /> Soal · bobot</dt><dd className="font-bold text-blue-950">{e.jumlahSoalTampil && e.jumlahSoalTampil < e.jumlahSoal ? `${e.jumlahSoalTampil} dari ${e.jumlahSoal} butir · ${Math.round((e.totalBobot / e.jumlahSoal) * e.jumlahSoalTampil * 100) / 100}` : `${e.jumlahSoal} butir · ${e.totalBobot}`}</dd></div>
               <div><dt className="flex items-center gap-1 text-[11px] uppercase tracking-wider text-slate-400"><Users size={12} /> Mengerjakan</dt><dd className="font-bold text-blue-950">{e.jumlahPeserta}</dd></div>
             </dl>
 
