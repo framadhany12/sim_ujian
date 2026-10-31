@@ -5,10 +5,10 @@ import { effBobot, prisma, wrap, audit, notifyMonitor, seededShuffle, attemptEnd
 
 const r = Router()
 
-// Ujian yang boleh diakses peserta: ujian untuk grupnya, atau yang sudah pernah dikerjakan
+// Ujian yang boleh diakses peserta: ujian untuk salah satu grupnya, atau yang sudah pernah dikerjakan
 const accessWhere = (user) => ({
   OR: [
-    ...(user.profile?.groupId ? [{ groups: { some: { groupId: user.profile.groupId } } }] : []),
+    { groups: { some: { group: { members: { some: { userId: user.id } } } } } },
     { attempts: { some: { userId: user.id } } },
   ],
 })

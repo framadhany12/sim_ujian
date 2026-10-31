@@ -9,7 +9,7 @@ const password = process.env.ADMIN_PASSWORD || 'admin12345'
 await prisma.user.upsert({
   where: { username },
   update: {},
-  create: { username, passwordHash: await bcrypt.hash(password, 10), role: 'admin', mustChangePassword: false },
+  create: { username, passwordHash: await bcrypt.hash(password, 10), role: 'admin', superAdmin: true, mustChangePassword: false },
 })
 console.log(`Admin siap: ${username} / ${password}`)
 await prisma.$disconnect()

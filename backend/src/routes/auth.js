@@ -6,8 +6,8 @@ const r = Router()
 
 const publicUser = (u) => ({
   id: u.id, username: u.username, role: u.role,
-  mustChangePassword: u.mustChangePassword,
-  nama: u.profile?.namaLengkap ?? (u.role === 'admin' ? 'Administrator' : u.username),
+  mustChangePassword: u.mustChangePassword, superAdmin: u.superAdmin,
+  nama: u.profile?.namaLengkap ?? u.nama ?? (u.role === 'admin' ? 'Administrator' : u.username),
 })
 
 r.post('/login', wrap(async (req, res) => {

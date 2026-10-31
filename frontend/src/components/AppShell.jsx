@@ -82,7 +82,7 @@ function UserChip({ user, onPassword, onLogout }) {
         <span className="grid place-items-center w-8 h-8 rounded-full bg-blue-700 text-white text-sm font-bold">{user.nama[0]?.toUpperCase()}</span>
         <span className="text-left leading-tight hidden sm:block">
           <span className="block text-sm font-semibold text-blue-950 max-w-36 truncate">{user.nama}</span>
-          <span className="block text-[11px] text-slate-500">{user.role === 'admin' ? 'Administrator' : 'Calon Mahasiswa'}</span>
+          <span className="block text-[11px] text-slate-500">{user.role === 'admin' ? (user.superAdmin ? 'Super Admin' : 'Admin') : 'Calon Mahasiswa'}</span>
         </span>
       </button>
       {open && (

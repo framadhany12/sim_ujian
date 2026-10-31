@@ -18,33 +18,58 @@ const sendSheet = (res, rows, name, format = 'xlsx') => {
   if (format === 'csv') {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8')
     res.setHeader('Content-Disposition', `attachment; filename="${name}.csv"`)
-    return res.send('﻿' + XLSX.utils.sheet_to_csv(wb.Sheets.Sheet1))
+    return res.send('\uFEFF' + XLSX.utils.sheet_to_csv(wb.Sheets.Sheet1))
   }
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   res.setHeader('Content-Disposition', `attachment; filename="${name}.xlsx"`)
   res.send(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }))
 }
 
+/* ───────────── Kepemilikan data ───────────── */
+
+// Super admin melihat semua data; admin lain hanya ujian, soal, kategori, dan grup buatannya
+const isSuper = (req) => req.user.superAdmin
+const own = (req) => (isSuper(req) ? {} : { createdBy: req.user.id })
+const canEditGroup = (req, g) => isSuper(req) || g.createdBy === req.user.id
+const adminName = (u) => (u ? u.nama || u.username : '-')
+// Peserta "milik" admin: anggota grup buatannya (super admin: semua peserta)
+const myPesertaWhere = (req) => (isSuper(req) ? { role: 'peserta' } : { role: 'peserta', memberships: { some: { group: { createdBy: req.user.id } } } })
+async function editableGroupIds(req) {
+  return new Set((await prisma.group.findMany({ where: own(req), select: { id: true } })).map((g) => g.id))
+}
+
+const guard = (find, message) => wrap(async (req, res, next) => {
+  const id = Object.values(req.params)[0]
+  if (!/^\d+$/.test(id)) return next()
+  if (!(await find(+id, req))) return res.status(404).json({ message })
+  next()
+})
+r.use('/exams/:id', guard((id, req) => prisma.exam.findFirst({ where: { id, ...own(req) }, select: { id: true } }), 'Ujian tidak ditemukan'))
+r.use('/questions/:qid', guard((id, req) => prisma.question.findFirst({ where: { id, ...own(req) }, select: { id: true } }), 'Soal tidak ditemukan'))
+r.use('/attempts/:id', guard((id, req) => prisma.examAttempt.findFirst({ where: { id, exam: own(req) }, select: { id: true } }), 'Pengerjaan tidak ditemukan'))
+
 /* ───────────── Dashboard ───────────── */
 
 r.get('/dashboard', wrap(async (req, res) => {
   const now = new Date()
   const since = new Date(Date.now() - 14 * 86400000)
+  const exam = own(req)
+  const pesertaIds = isSuper(req) ? null : (await prisma.user.findMany({ where: myPesertaWhere(req), select: { id: true } })).map((u) => u.id)
   const [pesertaAktif, pesertaTotal, ujian, soal, attempts, aktifSekarang, mendatang, logs, perUjian, esaiBelumDinilai, mintaReset, ujianTanpaSoal, terputus, recent] = await Promise.all([
-    prisma.user.count({ where: { role: 'peserta', status: 'aktif' } }),
-    prisma.user.count({ where: { role: 'peserta' } }),
-    prisma.exam.count(),
-    prisma.question.count(),
-    prisma.examAttempt.groupBy({ by: ['status'], _count: true }),
-    prisma.examToken.findMany({ where: { revokedAt: null, expiresAt: { gt: now }, exam: { aktif: true } }, orderBy: { expiresAt: 'asc' }, include: { exam: { select: { judul: true } } } }),
-    prisma.exam.findMany({ where: { aktif: true, tokens: { none: { revokedAt: null, expiresAt: { gt: now } } } }, orderBy: { id: 'desc' }, take: 5, select: { id: true, judul: true, durasiMenit: true } }),
-    prisma.activityLog.findMany({ where: { event: { notIn: ['heartbeat'] } }, orderBy: { id: 'desc' }, take: 10 }),
-    prisma.examAttempt.findMany({ where: { status: 'selesai' }, select: { examId: true, skorTotal: true, statusKelulusan: true } }),
-    prisma.answer.count({ where: { nilai: null, question: { tipe: 'esai' }, attempt: { status: 'selesai' } } }),
-    prisma.activityLog.count({ where: { event: 'minta_reset' } }),
-    prisma.exam.count({ where: { questions: { none: {} } } }),
-    prisma.examAttempt.count({ where: { status: 'sedang_mengerjakan', lastSeen: { lt: new Date(Date.now() - 45000) } } }),
-    prisma.examAttempt.findMany({ where: { waktuMulai: { gte: since } }, select: { waktuMulai: true } }),
+    prisma.user.count({ where: { ...myPesertaWhere(req), status: 'aktif' } }),
+    prisma.user.count({ where: myPesertaWhere(req) }),
+    prisma.exam.count({ where: exam }),
+    prisma.question.count({ where: own(req) }),
+    prisma.examAttempt.groupBy({ by: ['status'], where: { exam }, _count: true }),
+    prisma.examToken.findMany({ where: { revokedAt: null, expiresAt: { gt: now }, exam: { aktif: true, ...exam } }, orderBy: { expiresAt: 'asc' }, include: { exam: { select: { judul: true } } } }),
+    prisma.exam.findMany({ where: { ...exam, aktif: true, tokens: { none: { revokedAt: null, expiresAt: { gt: now } } } }, orderBy: { id: 'desc' }, take: 5, select: { id: true, judul: true, durasiMenit: true } }),
+    prisma.activityLog.findMany({ where: { event: { notIn: ['heartbeat'] }, ...(isSuper(req) ? {} : { OR: [{ userId: req.user.id }, { attempt: { exam } }] }) }, orderBy: { id: 'desc' }, take: 10 }),
+    prisma.examAttempt.findMany({ where: { status: 'selesai', exam }, select: { examId: true, skorTotal: true, statusKelulusan: true } }),
+    prisma.answer.count({ where: { nilai: null, question: { tipe: 'esai' }, attempt: { status: 'selesai', exam } } }),
+    prisma.activityLog.count({ where: { event: 'minta_reset', ...(pesertaIds ? { userId: { in: pesertaIds } } : {}) } }),
+    prisma.exam.count({ where: { ...exam, questions: { none: {} } } }),
+    prisma.examAttempt.count({ where: { exam, status: 'sedang_mengerjakan', lastSeen: { lt: new Date(Date.now() - 45000) } } }),
+    prisma.examAttempt.findMany({ where: { exam, waktuMulai: { gte: since } }, select: { waktuMulai: true } }),
   ])
   const bins = [0, 0, 0, 0, 0]
   for (const x of perUjian) if (x.skorTotal != null) bins[Math.min(4, Math.floor(Number(x.skorTotal) / 20))]++
@@ -74,42 +99,73 @@ r.get('/dashboard', wrap(async (req, res) => {
 
 const grupName = (s) => String(s ?? '').trim().slice(0, 60)
 
+// Semua admin melihat semua grup (kelas) dan boleh memakainya untuk ujian; hanya pembuatnya yang boleh mengubah
 r.get('/groups', wrap(async (req, res) => {
-  const groups = await prisma.group.findMany({ orderBy: { nama: 'asc' }, include: { _count: { select: { profiles: true, exams: true } } } })
-  res.json(groups.map((g) => ({ id: g.id, nama: g.nama, jumlahPeserta: g._count.profiles, jumlahUjian: g._count.exams })))
+  const groups = await prisma.group.findMany({ orderBy: { nama: 'asc' }, include: { owner: { select: { username: true, nama: true } }, _count: { select: { members: true, exams: true } } } })
+  res.json(groups.map((g) => ({
+    id: g.id, nama: g.nama, jumlahPeserta: g._count.members, jumlahUjian: g._count.exams,
+    pemilik: adminName(g.owner), milikSaya: g.createdBy === req.user.id, bisaUbah: canEditGroup(req, g),
+  })))
 }))
+
+const dupGroupMessage = async (g) => {
+  const owner = g.createdBy ? await prisma.user.findUnique({ where: { id: g.createdBy } }) : null
+  return `Grup "${g.nama}" sudah ada (dibuat oleh ${adminName(owner)}). Pakai grup itu atau pilih nama lain.`
+}
 
 r.post('/groups', wrap(async (req, res) => {
   const nama = grupName(req.body?.nama)
   if (!nama) return res.status(400).json({ message: 'Nama grup wajib diisi' })
-  if (await prisma.group.findUnique({ where: { nama } })) return res.status(409).json({ message: 'Nama grup sudah ada' })
-  const g = await prisma.group.create({ data: { nama } })
+  const dup = await prisma.group.findUnique({ where: { nama } })
+  if (dup) return res.status(409).json({ message: await dupGroupMessage(dup) })
+  const g = await prisma.group.create({ data: { nama, createdBy: req.user.id } })
   await audit(req.user.id, 'buat_grup', nama)
   res.status(201).json(g)
 }))
 
+async function editableGroup(req, res) {
+  const g = await prisma.group.findUnique({ where: { id: +req.params.id } })
+  if (!g) { res.status(404).json({ message: 'Grup tidak ditemukan' }); return null }
+  if (!canEditGroup(req, g)) { res.status(403).json({ message: 'Grup ini milik admin lain. Anda hanya dapat memakainya untuk ujian.' }); return null }
+  return g
+}
+
 r.put('/groups/:id', wrap(async (req, res) => {
+  if (!(await editableGroup(req, res))) return
   const nama = grupName(req.body?.nama)
   if (!nama) return res.status(400).json({ message: 'Nama grup wajib diisi' })
   const dup = await prisma.group.findUnique({ where: { nama } })
-  if (dup && dup.id !== +req.params.id) return res.status(409).json({ message: 'Nama grup sudah ada' })
+  if (dup && dup.id !== +req.params.id) return res.status(409).json({ message: await dupGroupMessage(dup) })
   const g = await prisma.group.update({ where: { id: +req.params.id }, data: { nama } })
   await audit(req.user.id, 'ubah_grup', nama)
   res.json(g)
 }))
 
 r.delete('/groups/:id', wrap(async (req, res) => {
+  if (!(await editableGroup(req, res))) return
   const g = await prisma.group.delete({ where: { id: +req.params.id } })
   await audit(req.user.id, 'hapus_grup', g.nama)
   res.json({ ok: true })
 }))
 
-// Cari grup menurut nama; buat bila belum ada (dipakai impor)
-async function findOrCreateGroup(nama) {
-  const n = grupName(nama)
-  if (!n) return null
-  return (await prisma.group.findUnique({ where: { nama: n } })) ?? prisma.group.create({ data: { nama: n } })
-}
+// Masukkan / keluarkan banyak peserta sekaligus dari satu grup milik admin
+r.post('/groups/:id/members', wrap(async (req, res) => {
+  const g = await editableGroup(req, res); if (!g) return
+  const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger))]
+  if (!ids.length) return res.status(400).json({ message: 'Tidak ada peserta yang dipilih' })
+  const users = (await prisma.user.findMany({ where: { id: { in: ids }, role: 'peserta' }, select: { id: true } })).map((u) => u.id)
+  if (req.body?.action === 'remove') {
+    const { count } = await prisma.groupMember.deleteMany({ where: { groupId: g.id, userId: { in: users } } })
+    await audit(req.user.id, 'keluarkan_dari_grup', `${count} peserta dari ${g.nama}`)
+    return res.json({ count })
+  }
+  const { count } = await prisma.groupMember.createMany({ data: users.map((userId) => ({ groupId: g.id, userId })), skipDuplicates: true })
+  await audit(req.user.id, 'masukkan_ke_grup', `${count} peserta ke ${g.nama}`)
+  res.json({ count })
+}))
+
+// Nama grup dari kolom impor: boleh lebih dari satu, dipisah titik koma atau koma
+const splitGroups = (s) => [...new Set(String(s ?? '').split(/[;,]/).map(grupName).filter(Boolean))]
 
 /* ───────────── Peserta ───────────── */
 
@@ -119,39 +175,57 @@ async function uniqueUsername(base) {
   while (await prisma.user.findUnique({ where: { username: name } })) name = `${base}${++n}`
   return name
 }
-async function createPeserta(d, groupId) {
+async function createPeserta(d, groupIds, createdBy) {
   const username = d.username ? d.username : await uniqueUsername(slug(d.nama_lengkap))
   const password = d.password || randomPassword()
   await prisma.user.create({
     data: {
       username, passwordHash: await bcrypt.hash(password, 10), role: 'peserta', mustChangePassword: true,
-      profile: { create: { namaLengkap: d.nama_lengkap, email: d.email || null, groupId: groupId ?? null } },
+      profile: { create: { namaLengkap: d.nama_lengkap, email: d.email || null, createdBy } },
+      memberships: { create: groupIds.map((groupId) => ({ groupId })) },
     },
   })
   return { username, password, nama_lengkap: d.nama_lengkap }
 }
+const canDeletePeserta = (req, profile) => isSuper(req) || profile?.createdBy === req.user.id
+// groupIds dari body; hanya grup milik admin yang diterima
+async function pickGroupIds(req, raw) {
+  const editable = await editableGroupIds(req)
+  const ids = [...new Set((Array.isArray(raw) ? raw : raw ? [raw] : []).map(Number).filter(Boolean))]
+  const bad = ids.filter((id) => !editable.has(id))
+  return { ids: ids.filter((id) => editable.has(id)), bad, editable }
+}
 
+// Semua admin dapat mencari semua mahasiswa (satu akun per mahasiswa, tidak dobel);
+// daftar di frontend default menampilkan mahasiswa di grup milik admin.
 r.get('/peserta', wrap(async (req, res) => {
-  const users = await prisma.user.findMany({ where: { role: 'peserta' }, include: { profile: { include: { group: true } } }, orderBy: { id: 'desc' } })
+  const users = await prisma.user.findMany({ where: { role: 'peserta' }, include: { profile: true, memberships: { include: { group: true } } }, orderBy: { id: 'desc' } })
   const reqs = await prisma.activityLog.findMany({ where: { event: 'minta_reset' }, select: { userId: true } })
   const asked = new Set(reqs.map((x) => x.userId))
-  res.json(users.map((u) => ({
-    id: u.id, username: u.username, status: u.status, mustChangePassword: u.mustChangePassword,
-    namaLengkap: u.profile?.namaLengkap, email: u.profile?.email,
-    groupId: u.profile?.groupId ?? null, grup: u.profile?.group?.nama ?? null,
-    mintaReset: asked.has(u.id),
-  })))
+  res.json(users.map((u) => {
+    const groups = u.memberships.map((m) => ({ id: m.group.id, nama: m.group.nama, bisaUbah: canEditGroup(req, m.group) })).sort((a, b) => a.nama.localeCompare(b.nama))
+    return {
+      id: u.id, username: u.username, status: u.status, mustChangePassword: u.mustChangePassword,
+      namaLengkap: u.profile?.namaLengkap, email: u.profile?.email,
+      groups, diGrupSaya: u.memberships.some((m) => m.group.createdBy === req.user.id),
+      bisaHapus: canDeletePeserta(req, u.profile), mintaReset: asked.has(u.id),
+    }
+  }))
 }))
 
 r.post('/peserta', wrap(async (req, res) => {
   const b = req.body ?? {}
   if (!b.nama_lengkap?.trim()) return res.status(400).json({ message: 'Nama lengkap wajib diisi' })
   if (b.password && String(b.password).length < 8) return res.status(400).json({ message: 'Password minimal 8 karakter' })
-  if (b.username && (await prisma.user.findUnique({ where: { username: b.username.trim() } })))
-    return res.status(409).json({ message: 'Username sudah dipakai' })
-  const groupId = b.groupId ? +b.groupId : null
-  if (groupId && !(await prisma.group.findUnique({ where: { id: groupId } }))) return res.status(400).json({ message: 'Grup tidak ditemukan' })
-  const cred = await createPeserta({ ...b, nama_lengkap: b.nama_lengkap.trim(), username: b.username?.trim() }, groupId)
+  const existing = b.username && (await prisma.user.findUnique({ where: { username: b.username.trim() }, include: { profile: true } }))
+  if (existing) return res.status(409).json({
+    message: existing.role === 'peserta'
+      ? `Username sudah terdaftar atas nama ${existing.profile?.namaLengkap ?? existing.username}. Cari mahasiswa itu di daftar (pilih "Semua mahasiswa"), lalu masukkan ke grup Anda lewat tombol Ubah.`
+      : 'Username sudah dipakai',
+  })
+  const { ids, bad } = await pickGroupIds(req, b.groupIds ?? b.groupId)
+  if (bad.length) return res.status(403).json({ message: 'Anda hanya dapat memasukkan peserta ke grup milik Anda sendiri' })
+  const cred = await createPeserta({ ...b, nama_lengkap: b.nama_lengkap.trim(), username: b.username?.trim() }, ids, req.user.id)
   await audit(req.user.id, 'tambah_peserta', cred.username)
   res.status(201).json(cred)
 }))
@@ -161,8 +235,8 @@ r.post('/peserta', wrap(async (req, res) => {
 const PESERTA_COLS = [
   { key: 'nama_lengkap', header: 'nama_lengkap', width: 30, required: true, note: 'WAJIB. Nama lengkap peserta.' },
   { key: 'email', header: 'email', width: 30, note: 'Opsional. Harus berformat email yang valid.' },
-  { key: 'grup', header: 'grup', width: 18, strictList: false, note: 'Opsional. Pilih dari daftar atau ketik nama grup baru (otomatis dibuat).' },
-  { key: 'username', header: 'username', width: 20, note: 'Opsional. 3–30 karakter: huruf, angka, titik, strip, underscore. Kosong = dibuat otomatis dari nama.' },
+  { key: 'grup', header: 'grup', width: 18, strictList: false, note: 'Opsional. Pilih dari daftar atau ketik nama grup baru (otomatis dibuat). Lebih dari satu grup: pisahkan dengan titik koma (;).' },
+  { key: 'username', header: 'username', width: 20, note: 'Opsional. 3–30 karakter: huruf, angka, titik, strip, underscore. Kosong = dibuat otomatis dari nama. Username mahasiswa yang sudah terdaftar = mahasiswa itu dimasukkan ke grup (akun tidak dibuat dobel).' },
   { key: 'password', header: 'password', width: 20, note: 'Opsional. Minimal 8 karakter. Kosong = dibuat acak.' },
 ]
 const PESERTA_ALIASES = {
@@ -173,11 +247,12 @@ const PESERTA_ALIASES = {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const USERNAME_RE = /^[A-Za-z0-9._-]{3,30}$/
 
-// Validasi baris peserta; dipakai untuk pratinjau dan penyimpanan
-async function validatePeserta(rows) {
+// Validasi baris peserta; dipakai untuk pratinjau dan penyimpanan.
+// Username mahasiswa yang sudah ada → baris "gabung": mahasiswa dimasukkan ke grup, akun tidak dibuat ulang.
+async function validatePeserta(rows, req) {
   const groups = await prisma.group.findMany()
-  const groupByLower = new Map(groups.map((g) => [g.nama.toLowerCase(), g.nama]))
-  const existing = new Set((await prisma.user.findMany({ select: { username: true } })).map((u) => u.username.toLowerCase()))
+  const groupByLower = new Map(groups.map((g) => [g.nama.toLowerCase(), g]))
+  const users = new Map((await prisma.user.findMany({ select: { id: true, username: true, role: true } })).map((u) => [u.username.toLowerCase(), u]))
   const seen = new Set()
   const valid = [], invalid = []
   const newGroups = new Set()
@@ -187,26 +262,30 @@ async function validatePeserta(rows) {
     const email = String(row.email ?? '').trim()
     const username = String(row.username ?? '').trim()
     const password = String(row.password ?? '')
-    const grupIn = String(row.grup ?? '').trim()
     const fail = (alasan) => invalid.push({ baris, alasan, nama })
-    if (!nama) { fail('nama_lengkap kosong'); continue }
+    const k = username.toLowerCase()
+    const existing = username ? users.get(k) : null
+    if (!nama && !existing) { fail('nama_lengkap kosong'); continue }
     if (nama.length > 100) { fail('nama_lengkap terlalu panjang (maks. 100 karakter)'); continue }
     if (email && !EMAIL_RE.test(email)) { fail(`email "${email}" tidak valid`); continue }
     if (username) {
       if (!USERNAME_RE.test(username)) { fail(`username "${username}" tidak valid (3–30 karakter: huruf, angka, titik, strip, underscore)`); continue }
-      const k = username.toLowerCase()
-      if (existing.has(k)) { fail(`username "${username}" sudah dipakai`); continue }
+      if (existing && existing.role !== 'peserta') { fail(`username "${username}" sudah dipakai akun admin`); continue }
       if (seen.has(k)) { fail(`username "${username}" ganda di dalam berkas`); continue }
     }
     if (password && password.length < 8) { fail('password minimal 8 karakter'); continue }
-    if (grupIn.length > 60) { fail('nama grup terlalu panjang (maks. 60 karakter)'); continue }
-    let grup = ''
-    if (grupIn) {
-      grup = groupByLower.get(grupIn.toLowerCase()) ?? grupIn
-      if (!groupByLower.has(grupIn.toLowerCase())) newGroups.add(grup)
+    const names = splitGroups(row.grup)
+    if (names.some((n) => n.length > 60)) { fail('nama grup terlalu panjang (maks. 60 karakter)'); continue }
+    const grup = [], foreign = []
+    for (const n of names) {
+      const g = groupByLower.get(n.toLowerCase())
+      if (g && !canEditGroup(req, g)) foreign.push(g.nama)
+      else { grup.push(g?.nama ?? n); if (!g) newGroups.add(n) }
     }
-    if (username) seen.add(username.toLowerCase())
-    valid.push({ baris, nama_lengkap: nama, email, grup, username, password })
+    if (foreign.length) { fail(`grup "${foreign.join('", "')}" milik admin lain — Anda hanya dapat memasukkan peserta ke grup milik Anda`); continue }
+    if (existing && !grup.length) { fail(`username "${username}" sudah terdaftar; isi kolom grup untuk memasukkannya ke grup Anda`); continue }
+    if (username) seen.add(k)
+    valid.push({ baris, nama_lengkap: nama, email, grup: grup.join('; '), username, password, sudahAda: !!existing })
   }
   return { valid, invalid, grupBaru: [...newGroups] }
 }
@@ -214,25 +293,40 @@ async function validatePeserta(rows) {
 r.post('/peserta/import/preview', upload.single('file'), wrap(async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'Berkas belum dipilih' })
   const rows = readTable(req.file.buffer, req.file.originalname, { required: ['nama_lengkap'], aliases: PESERTA_ALIASES })
-  res.json(await validatePeserta(rows))
+  res.json(await validatePeserta(rows, req))
 }))
 
 // Simpan baris yang sudah lolos pratinjau (divalidasi ulang di server)
 r.post('/peserta/import', wrap(async (req, res) => {
   const rows = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, MAX_ROWS) : []
-  const { valid, invalid } = await validatePeserta(rows)
-  const created = []
-  for (const row of valid) {
-    const g = await findOrCreateGroup(row.grup)
-    try { created.push({ ...(await createPeserta(row, g?.id)), grup: g?.nama ?? '' }) }
-    catch { invalid.push({ baris: row.baris, alasan: 'gagal disimpan (username bentrok)', nama: row.nama_lengkap }) }
+  const { valid, invalid } = await validatePeserta(rows, req)
+  const groupIdOf = new Map()
+  const resolve = async (nama) => {
+    const k = nama.toLowerCase()
+    if (!groupIdOf.has(k)) {
+      const g = (await prisma.group.findUnique({ where: { nama } })) ?? (await prisma.group.create({ data: { nama, createdBy: req.user.id } }))
+      groupIdOf.set(k, g.id)
+    }
+    return groupIdOf.get(k)
   }
-  await audit(req.user.id, 'impor_peserta', `${created.length} berhasil, ${invalid.length} gagal`)
-  res.json({ created, failed: invalid })
+  const created = [], joined = []
+  for (const row of valid) {
+    const ids = []
+    for (const n of splitGroups(row.grup)) ids.push(await resolve(n))
+    try {
+      if (row.sudahAda) {
+        const u = await prisma.user.findUnique({ where: { username: row.username }, include: { profile: true } })
+        await prisma.groupMember.createMany({ data: ids.map((groupId) => ({ groupId, userId: u.id })), skipDuplicates: true })
+        joined.push({ username: u.username, nama_lengkap: u.profile?.namaLengkap ?? u.username, grup: row.grup })
+      } else created.push({ ...(await createPeserta(row, ids, req.user.id)), grup: row.grup })
+    } catch { invalid.push({ baris: row.baris, alasan: 'gagal disimpan (username bentrok)', nama: row.nama_lengkap }) }
+  }
+  await audit(req.user.id, 'impor_peserta', `${created.length} baru, ${joined.length} masuk grup, ${invalid.length} gagal`)
+  res.json({ created, joined, failed: invalid })
 }))
 
 r.get('/peserta/template', wrap(async (req, res) => {
-  const groups = (await prisma.group.findMany({ orderBy: { nama: 'asc' } })).map((g) => g.nama)
+  const groups = (await prisma.group.findMany({ where: own(req), orderBy: { nama: 'asc' } })).map((g) => g.nama)
   const rows = [
     { nama_lengkap: 'Contoh Peserta Satu', email: 'peserta1@contoh.com', grup: groups[0] ?? 'kip2026', username: '', password: '' },
     { nama_lengkap: 'Contoh Peserta Dua', email: '', grup: groups[0] ?? 'kip2026', username: '', password: '' },
@@ -247,8 +341,8 @@ r.get('/peserta/template', wrap(async (req, res) => {
       'KOLOM:',
       '• nama_lengkap (WAJIB, judul kuning) — nama lengkap peserta.',
       '• email — opsional, harus berformat email (contoh: nama@domain.com).',
-      '• grup — opsional. Pilih dari dropdown, atau ketik nama grup baru (akan dibuat otomatis). Huruf besar/kecil diabaikan.',
-      '• username — opsional. 3–30 karakter: huruf, angka, titik, strip, underscore. Kosong = dibuat otomatis dari nama. Tidak boleh sama dengan username lain.',
+      '• grup — opsional. Pilih dari dropdown, atau ketik nama grup baru (akan dibuat otomatis). Lebih dari satu grup/kelas: pisahkan dengan titik koma, mis. "TI-2A; Basis Data". Hanya grup milik Anda yang dapat diisi.',
+      '• username — opsional. 3–30 karakter: huruf, angka, titik, strip, underscore. Kosong = dibuat otomatis dari nama. Bila username mahasiswa SUDAH TERDAFTAR, akun tidak dibuat dobel: mahasiswa itu cukup dimasukkan ke grup di kolom grup.',
       '• password — opsional, minimal 8 karakter. Kosong = dibuat acak. Peserta wajib menggantinya saat login pertama.',
       'SETELAH UNGGAH:',
       '• Sistem menampilkan pratinjau: baris yang valid dan baris yang bermasalah beserta alasannya. Perbaiki berkas lalu unggah ulang, atau simpan baris yang valid saja.',
@@ -259,9 +353,9 @@ r.get('/peserta/template', wrap(async (req, res) => {
 }))
 
 r.get('/peserta/export', wrap(async (req, res) => {
-  const users = await prisma.user.findMany({ where: { role: 'peserta' }, include: { profile: { include: { group: true } } }, orderBy: { id: 'asc' } })
+  const users = await prisma.user.findMany({ where: myPesertaWhere(req), include: { profile: true, memberships: { include: { group: true } } }, orderBy: { id: 'asc' } })
   const cols = [...PESERTA_COLS, { key: 'status', header: 'status', width: 12 }]
-  const rows = users.map((u) => ({ nama_lengkap: u.profile?.namaLengkap ?? '', email: u.profile?.email ?? '', grup: u.profile?.group?.nama ?? '', username: u.username, password: '', status: u.status }))
+  const rows = users.map((u) => ({ nama_lengkap: u.profile?.namaLengkap ?? '', email: u.profile?.email ?? '', grup: u.memberships.map((m) => m.group.nama).sort().join('; '), username: u.username, password: '', status: u.status }))
   await audit(req.user.id, 'ekspor_peserta', `${rows.length} peserta`)
   if (req.query.format === 'csv') return sendCsv(res, cols, rows, 'data-peserta')
   sendBuffer(res, await buildWorkbook({
@@ -278,11 +372,19 @@ r.put('/peserta/:id', wrap(async (req, res) => {
   const profile = {}
   if ('namaLengkap' in b) profile.namaLengkap = String(b.namaLengkap).trim()
   if ('email' in b) profile.email = b.email || null
-  if ('groupId' in b) profile.groupId = b.groupId ? +b.groupId : null
-  await prisma.user.update({
+  const ops = [prisma.user.update({
     where: { id },
     data: { ...(b.status ? { status: b.status } : {}), ...(Object.keys(profile).length ? { profile: { update: profile } } : {}) },
-  })
+  })]
+  // Keanggotaan hanya diubah untuk grup milik admin ini; grup admin lain tetap
+  if ('groupIds' in b) {
+    const { ids, editable } = await pickGroupIds(req, b.groupIds)
+    ops.push(
+      prisma.groupMember.deleteMany({ where: { userId: id, groupId: { in: [...editable], notIn: ids } } }),
+      prisma.groupMember.createMany({ data: ids.map((groupId) => ({ groupId, userId: id })), skipDuplicates: true }),
+    )
+  }
+  await prisma.$transaction(ops)
   await audit(req.user.id, 'ubah_peserta', user.username)
   res.json({ ok: true })
 }))
@@ -300,9 +402,11 @@ r.post('/peserta/:id/reset-password', wrap(async (req, res) => {
   res.json({ username: user.username, password })
 }))
 
+// Akun mahasiswa dipakai bersama; hanya pembuat akun atau super admin yang boleh menghapusnya
 r.delete('/peserta/:id', wrap(async (req, res) => {
-  const user = await prisma.user.findFirst({ where: { id: +req.params.id, role: 'peserta' } })
+  const user = await prisma.user.findFirst({ where: { id: +req.params.id, role: 'peserta' }, include: { profile: true } })
   if (!user) return res.status(404).json({ message: 'Peserta tidak ditemukan' })
+  if (!canDeletePeserta(req, user.profile)) return res.status(403).json({ message: 'Akun mahasiswa ini dibuat admin lain. Keluarkan dari grup Anda lewat tombol Ubah.' })
   await prisma.user.delete({ where: { id: user.id } })
   await audit(req.user.id, 'hapus_peserta', user.username)
   res.json({ ok: true })
@@ -311,10 +415,11 @@ r.delete('/peserta/:id', wrap(async (req, res) => {
 r.post('/peserta/bulk-delete', wrap(async (req, res) => {
   const ids = [...new Set((req.body?.ids ?? []).map(Number).filter(Number.isInteger))]
   if (!ids.length) return res.status(400).json({ message: 'Tidak ada peserta yang dipilih' })
-  const users = await prisma.user.findMany({ where: { id: { in: ids }, role: 'peserta' }, select: { id: true, username: true } })
+  const found = await prisma.user.findMany({ where: { id: { in: ids }, role: 'peserta' }, select: { id: true, username: true, profile: true } })
+  const users = found.filter((u) => canDeletePeserta(req, u.profile))
   await prisma.user.deleteMany({ where: { id: { in: users.map((u) => u.id) } } })
   await audit(req.user.id, 'hapus_peserta', `${users.length} peserta: ${users.map((u) => u.username).join(', ')}`.slice(0, 180))
-  res.json({ deleted: users.length })
+  res.json({ deleted: users.length, skipped: found.length - users.length })
 }))
 
 /* ───────────── Ujian: jadwal, token & grup ───────────── */
@@ -342,13 +447,19 @@ const withGroups = (e) => ({
   groups: (e.groups ?? []).map((x) => ({ id: x.group.id, nama: x.group.nama })),
   tokenAktif: e.tokens?.[0] ? { token: e.tokens[0].token, expiresAt: e.tokens[0].expiresAt } : null,
   tokens: undefined,
+  pembuat: e.creator ? adminName(e.creator) : undefined, creator: undefined,
 })
+// Grup pelaksana boleh grup milik siapa pun (kelas dipakai bersama)
+async function validGroupIds(b) {
+  const ids = groupIds(b)
+  return (await prisma.group.findMany({ where: { id: { in: ids } }, select: { id: true } })).map((g) => g.id)
+}
 
 r.get('/exams', wrap(async (req, res) => {
   const exams = await prisma.exam.findMany({
-    orderBy: { id: 'desc' },
+    where: own(req), orderBy: { id: 'desc' },
     include: {
-      _count: { select: { questions: true, attempts: true } }, groups: { include: { group: true } },
+      _count: { select: { questions: true, attempts: true } }, groups: { include: { group: true } }, creator: { select: { username: true, nama: true } },
       questions: { select: { bobot: true, question: { select: { bobot: true } } } },
       tokens: { where: { revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: 'desc' }, take: 1 },
     },
@@ -361,7 +472,7 @@ r.post('/exams', wrap(async (req, res) => {
   const err = validExam(d)
   if (err) return res.status(400).json({ message: err })
   const exam = await prisma.exam.create({
-    data: { ...d, createdBy: req.user.id, groups: { create: groupIds(req.body).map((groupId) => ({ groupId })) } },
+    data: { ...d, createdBy: req.user.id, groups: { create: (await validGroupIds(req.body)).map((groupId) => ({ groupId })) } },
   })
   await audit(req.user.id, 'buat_ujian', exam.judul)
   res.status(201).json(exam)
@@ -372,9 +483,10 @@ r.put('/exams/:id', wrap(async (req, res) => {
   const err = validExam(d)
   if (err) return res.status(400).json({ message: err })
   const id = +req.params.id
+  const gids = await validGroupIds(req.body)
   const [, exam] = await prisma.$transaction([
     prisma.examGroup.deleteMany({ where: { examId: id } }),
-    prisma.exam.update({ where: { id }, data: { ...d, groups: { create: groupIds(req.body).map((groupId) => ({ groupId })) } } }),
+    prisma.exam.update({ where: { id }, data: { ...d, groups: { create: gids.map((groupId) => ({ groupId })) } } }),
   ])
   await audit(req.user.id, 'ubah_ujian', exam.judul)
   res.json(exam)
@@ -405,7 +517,7 @@ const serializeToken = (t) => {
 r.get('/tokens', wrap(async (req, res) => {
   // Riwayat tidak disimpan: token kedaluwarsa/dicabut dibersihkan setiap daftar dibuka
   await prisma.examToken.deleteMany({ where: { OR: [{ expiresAt: { lte: new Date() } }, { revokedAt: { not: null } }] } })
-  const tokens = await prisma.examToken.findMany({ orderBy: { id: 'desc' }, take: 100, include: { exam: { select: { judul: true } } } })
+  const tokens = await prisma.examToken.findMany({ where: { exam: own(req) }, orderBy: { id: 'desc' }, take: 100, include: { exam: { select: { judul: true } } } })
   res.json(tokens.map(serializeToken))
 }))
 
@@ -414,7 +526,7 @@ r.post('/tokens', wrap(async (req, res) => {
   const examId = +req.body?.examId
   const minutes = TOKEN_DURATIONS[req.body?.durasi]
   if (!minutes) return res.status(400).json({ message: 'Pilih masa berlaku token: 30 menit, 1 jam, 4 jam, 12 jam, atau 1 hari' })
-  const exam = await prisma.exam.findUnique({ where: { id: examId }, include: { _count: { select: { questions: true, groups: true } } } })
+  const exam = await prisma.exam.findFirst({ where: { id: examId, ...own(req) }, include: { _count: { select: { questions: true, groups: true } } } })
   if (!exam) return res.status(404).json({ message: 'Ujian tidak ditemukan' })
   if (!exam.aktif) return res.status(400).json({ message: 'Ujian sedang nonaktif. Aktifkan dulu di menu Ujian Tersedia.' })
   if (exam._count.questions === 0) return res.status(400).json({ message: 'Ujian belum punya soal. Isi bank soal terlebih dahulu.' })
@@ -434,6 +546,7 @@ r.post('/tokens', wrap(async (req, res) => {
 
 r.delete('/tokens/:id', wrap(async (req, res) => {
   // Dicabut = dihapus permanen dari database (tidak disimpan sebagai riwayat)
+  if (!(await prisma.examToken.findFirst({ where: { id: +req.params.id, exam: own(req) } }))) return res.status(404).json({ message: 'Token tidak ditemukan' })
   const t = await prisma.examToken.delete({ where: { id: +req.params.id }, include: { exam: { select: { judul: true } } } })
   await audit(req.user.id, 'cabut_token', t.exam.judul)
   res.json({ ok: true })
@@ -479,14 +592,15 @@ function normalizeQuestion(b) {
 r.get('/questions', wrap(async (req, res) => {
   const { q, tipe, kategori } = req.query
   const where = {
+    ...own(req),
     ...(tipe ? { tipe: String(tipe) } : {}),
     ...(kategori ? { kategori: String(kategori) } : {}),
     ...(q ? { teksSoal: { contains: String(q) } } : {}),
   }
   const [items, cats, registered] = await Promise.all([
     prisma.question.findMany({ where, include: { options: true, _count: { select: { examLinks: true } } }, orderBy: { id: 'desc' } }),
-    prisma.question.findMany({ where: { kategori: { not: null } }, distinct: ['kategori'], select: { kategori: true }, orderBy: { kategori: 'asc' } }),
-    prisma.questionCategory.findMany({ select: { nama: true } }),
+    prisma.question.findMany({ where: { ...own(req), kategori: { not: null } }, distinct: ['kategori'], select: { kategori: true }, orderBy: { kategori: 'asc' } }),
+    prisma.questionCategory.findMany({ where: own(req), select: { nama: true } }),
   ])
   const daftarKategori = [...new Set([...cats.map((c) => c.kategori), ...registered.map((c) => c.nama)])].sort((a, b) => a.localeCompare(b))
   res.json({ items: items.map(serializeQ), kategori: daftarKategori })
@@ -495,8 +609,8 @@ r.get('/questions', wrap(async (req, res) => {
 // Kategori: daftar terdaftar + kategori yang hanya muncul dari soal, beserta jumlah soalnya
 r.get('/question-categories', wrap(async (req, res) => {
   const [used, registered] = await Promise.all([
-    prisma.question.groupBy({ by: ['kategori'], where: { kategori: { not: null } }, _count: { _all: true } }),
-    prisma.questionCategory.findMany({ select: { nama: true } }),
+    prisma.question.groupBy({ by: ['kategori'], where: { ...own(req), kategori: { not: null } }, _count: { _all: true } }),
+    prisma.questionCategory.findMany({ where: own(req), select: { nama: true } }),
   ])
   const count = new Map(used.map((u) => [u.kategori, u._count._all]))
   const names = [...new Set([...count.keys(), ...registered.map((c) => c.nama)])].sort((a, b) => a.localeCompare(b))
@@ -506,9 +620,9 @@ r.get('/question-categories', wrap(async (req, res) => {
 r.post('/question-categories', wrap(async (req, res) => {
   const nama = String(req.body?.nama ?? '').trim().slice(0, 80)
   if (!nama) return res.status(400).json({ message: 'Nama kategori wajib diisi' })
-  const exists = await prisma.questionCategory.findFirst({ where: { nama } }) ?? await prisma.question.findFirst({ where: { kategori: nama }, select: { id: true } })
+  const exists = await prisma.questionCategory.findFirst({ where: { nama, createdBy: req.user.id } }) ?? await prisma.question.findFirst({ where: { kategori: nama, createdBy: req.user.id }, select: { id: true } })
   if (exists) return res.status(409).json({ message: 'Kategori sudah ada' })
-  await prisma.questionCategory.create({ data: { nama } })
+  await prisma.questionCategory.create({ data: { nama, createdBy: req.user.id } })
   await audit(req.user.id, 'tambah_kategori_soal', nama)
   res.status(201).json({ nama, jumlahSoal: 0 })
 }))
@@ -516,8 +630,8 @@ r.post('/question-categories', wrap(async (req, res) => {
 // Hanya kategori yang tidak dipakai soal manapun yang boleh dihapus
 r.delete('/question-categories', wrap(async (req, res) => {
   const nama = String(req.query.nama ?? '').trim()
-  if (await prisma.question.count({ where: { kategori: nama } })) return res.status(409).json({ message: 'Kategori masih dipakai soal, tidak dapat dihapus.' })
-  await prisma.questionCategory.deleteMany({ where: { nama } })
+  if (await prisma.question.count({ where: { ...own(req), kategori: nama } })) return res.status(409).json({ message: 'Kategori masih dipakai soal, tidak dapat dihapus.' })
+  await prisma.questionCategory.deleteMany({ where: { ...own(req), nama } })
   await audit(req.user.id, 'hapus_kategori_soal', nama)
   res.json({ ok: true })
 }))
@@ -525,7 +639,7 @@ r.delete('/question-categories', wrap(async (req, res) => {
 r.post('/questions', wrap(async (req, res) => {
   const n = normalizeQuestion(req.body ?? {})
   if (n.error) return res.status(400).json({ message: n.error })
-  const q = await prisma.question.create({ data: { ...n.data, options: { create: n.options } }, include: { options: true } })
+  const q = await prisma.question.create({ data: { ...n.data, createdBy: req.user.id, options: { create: n.options } }, include: { options: true } })
   await audit(req.user.id, 'tambah_soal', 'soal ' + q.id)
   res.status(201).json(serializeQ(q))
 }))
@@ -535,7 +649,7 @@ r.post('/questions/:qid/duplicate', wrap(async (req, res) => {
   if (!src) return res.status(404).json({ message: 'Soal tidak ditemukan' })
   const q = await prisma.question.create({
     data: {
-      tipe: src.tipe, teksSoal: src.teksSoal + ' (salinan)', kunciJawaban: src.kunciJawaban, bobot: src.bobot, acakOpsi: src.acakOpsi, pembahasan: src.pembahasan, kategori: src.kategori,
+      createdBy: req.user.id, tipe: src.tipe, teksSoal: src.teksSoal + ' (salinan)', kunciJawaban: src.kunciJawaban, bobot: src.bobot, acakOpsi: src.acakOpsi, pembahasan: src.pembahasan, kategori: src.kategori,
       options: { create: src.options.map((o) => ({ label: o.label, teksOpsi: o.teksOpsi, isBenar: o.isBenar })) },
     },
     include: { options: true },
@@ -565,7 +679,7 @@ r.put('/exams/:id/questions', wrap(async (req, res) => {
     if (bobot !== null && !(bobot > 0 && bobot <= 9999)) return res.status(400).json({ message: 'Bobot harus berupa angka lebih dari 0' })
     items.push({ questionId, bobot })
   }
-  const found = await prisma.question.findMany({ where: { id: { in: items.map((i) => i.questionId) } }, select: { id: true, bobot: true } })
+  const found = await prisma.question.findMany({ where: { id: { in: items.map((i) => i.questionId) }, ...own(req) }, select: { id: true, bobot: true } })
   if (found.length !== items.length) return res.status(400).json({ message: 'Ada soal yang tidak ditemukan di bank soal' })
   const def = new Map(found.map((f) => [f.id, Number(f.bobot)]))
   await prisma.$transaction([
@@ -599,8 +713,9 @@ r.delete('/questions/:qid', wrap(async (req, res) => {
 r.post('/questions/bulk-delete', wrap(async (req, res) => {
   const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger))]
   if (!ids.length) return res.status(400).json({ message: 'Pilih minimal satu soal' })
-  const answered = new Set((await prisma.answer.findMany({ where: { questionId: { in: ids } }, distinct: ['questionId'], select: { questionId: true } })).map((a) => a.questionId))
-  const deletable = ids.filter((id) => !answered.has(id))
+  const mine = (await prisma.question.findMany({ where: { id: { in: ids }, ...own(req) }, select: { id: true } })).map((q) => q.id)
+  const answered = new Set((await prisma.answer.findMany({ where: { questionId: { in: mine } }, distinct: ['questionId'], select: { questionId: true } })).map((a) => a.questionId))
+  const deletable = mine.filter((id) => !answered.has(id))
   const { count } = await prisma.question.deleteMany({ where: { id: { in: deletable } } })
   await audit(req.user.id, 'hapus_soal_massal', `${count} soal`)
   res.json({ deleted: count, skipped: answered.size })
@@ -673,7 +788,7 @@ async function sendQuestionExport(req, res, qs, label) {
 
 // Ekspor seluruh bank soal (format sama dengan template; dapat diimpor ulang)
 r.get('/questions/export', wrap(async (req, res) => {
-  await sendQuestionExport(req, res, await prisma.question.findMany({ include: { options: true }, orderBy: { id: 'asc' } }), 'dari bank soal')
+  await sendQuestionExport(req, res, await prisma.question.findMany({ where: own(req), include: { options: true }, orderBy: { id: 'asc' } }), 'dari bank soal')
 }))
 
 // Ekspor soal yang dipilih sebuah ujian
@@ -721,7 +836,7 @@ r.post('/questions/import/save', wrap(async (req, res) => {
   for (const item of items) {
     const n = normalizeQuestion(item)
     if (n.error) { failed.push({ baris: item.baris, alasan: n.error }); continue }
-    await prisma.question.create({ data: { ...n.data, options: { create: n.options } } })
+    await prisma.question.create({ data: { ...n.data, createdBy: req.user.id, options: { create: n.options } } })
     saved++
   }
   await audit(req.user.id, 'impor_soal', `${saved} soal ke bank soal`)
@@ -730,14 +845,23 @@ r.post('/questions/import/save', wrap(async (req, res) => {
 
 /* ───────────── Pemantauan ───────────── */
 
+const examGroupIds = async (examId) => new Set((await prisma.examGroup.findMany({ where: { examId }, select: { groupId: true } })).map((g) => g.groupId))
+// Nama grup peserta yang menjadi pelaksana ujian (bila tidak ada, semua grupnya)
+const grupLabel = (u, examGroups) => {
+  const all = u.memberships.map((m) => m.group)
+  const hit = all.filter((g) => examGroups.has(g.id))
+  return (hit.length ? hit : all).map((g) => g.nama).sort().join(', ')
+}
+
 r.get('/exams/:id/monitor', wrap(async (req, res) => {
   const examId = +req.params.id
-  const [peserta, attempts] = await Promise.all([
+  const [peserta, attempts, examGroups] = await Promise.all([
     prisma.user.findMany({
-      where: { role: 'peserta', status: 'aktif', OR: [{ profile: { group: { exams: { some: { examId } } } } }, { attempts: { some: { examId } } }] },
-      include: { profile: { include: { group: true } } },
+      where: { role: 'peserta', status: 'aktif', OR: [{ memberships: { some: { group: { exams: { some: { examId } } } } } }, { attempts: { some: { examId } } }] },
+      include: { profile: true, memberships: { include: { group: true } } },
     }),
     prisma.examAttempt.findMany({ where: { examId }, include: { logs: { select: { event: true } } } }),
+    examGroupIds(examId),
   ])
   const byUser = new Map(attempts.map((a) => [a.userId, a]))
   const shots = new Map(await Promise.all(attempts.map(async (a) => [a.id, await listShots(a.id)])))
@@ -748,7 +872,7 @@ r.get('/exams/:id/monitor', wrap(async (req, res) => {
     const terputus = a?.status === 'sedang_mengerjakan' && a.lastSeen && now - a.lastSeen.getTime() > 45000
     const s = a ? shots.get(a.id) : []
     return {
-      userId: u.id, attemptId: a?.id ?? null, nama: u.profile?.namaLengkap ?? u.username, username: u.username, grup: u.profile?.group?.nama ?? null,
+      userId: u.id, attemptId: a?.id ?? null, nama: u.profile?.namaLengkap ?? u.username, username: u.username, grup: grupLabel(u, examGroups) || null,
       status: a?.status ?? 'belum_mulai', waktuMulai: a?.waktuMulai ?? null, lastSeen: a?.lastSeen ?? null,
       keluarHalaman: keluar, terputus: !!terputus,
       kameraTerakhir: s[0] ?? null, jumlahFoto: s.length,
@@ -796,7 +920,7 @@ r.get('/exams/:id/essays', wrap(async (req, res) => {
 }))
 
 r.put('/answers/:id/nilai', wrap(async (req, res) => {
-  const answer = await prisma.answer.findUnique({ where: { id: +req.params.id }, include: { question: true, attempt: true } })
+  const answer = await prisma.answer.findFirst({ where: { id: +req.params.id, attempt: { exam: own(req) } }, include: { question: true, attempt: true } })
   if (!answer || answer.question.tipe !== 'esai') return res.status(404).json({ message: 'Jawaban tidak ditemukan' })
   const eq = await prisma.examQuestion.findUnique({ where: { examId_questionId: { examId: answer.attempt.examId, questionId: answer.questionId } }, include: { question: true } })
   const maks = eq ? effBobot(eq) : Number(answer.question.bobot)
@@ -818,10 +942,11 @@ async function rekap(examId, { from, to } = {}) {
   if (from && !isNaN(Date.parse(from))) range.gte = new Date(from)
   if (to && !isNaN(Date.parse(to))) range.lt = new Date(to)
   const attempts = await prisma.examAttempt.findMany({
-    where: { examId, ...(Object.keys(range).length && { waktuMulai: range }) }, include: { user: { include: { profile: { include: { group: true } } } } }, orderBy: { skorTotal: 'desc' },
+    where: { examId, ...(Object.keys(range).length && { waktuMulai: range }) }, include: { user: { include: { profile: true, memberships: { include: { group: true } } } } }, orderBy: { skorTotal: 'desc' },
   })
+  const examGroups = await examGroupIds(examId)
   return { exam, rows: attempts.map((a) => ({
-    username: a.user.username, nama: a.user.profile?.namaLengkap ?? a.user.username, grup: a.user.profile?.group?.nama ?? '',
+    username: a.user.username, nama: a.user.profile?.namaLengkap ?? a.user.username, grup: grupLabel(a.user, examGroups),
     status: a.status, skor: a.skorTotal == null ? null : Number(a.skorTotal), kelulusan: a.statusKelulusan,
     waktuMulai: a.waktuMulai, waktuSelesai: a.waktuSelesai,
   })) }
@@ -846,6 +971,64 @@ r.put('/exams/:id/tampil-hasil', wrap(async (req, res) => {
   const exam = await prisma.exam.update({ where: { id: +req.params.id }, data: { tampilkanHasil: !!req.body?.tampil } })
   await audit(req.user.id, 'atur_tampil_hasil', `${exam.judul}: ${exam.tampilkanHasil}`)
   res.json({ tampilkanHasil: exam.tampilkanHasil })
+}))
+
+/* ───────────── Akun admin (khusus super admin) ───────────── */
+
+const requireSuper = (req, res, next) => (isSuper(req) ? next() : res.status(403).json({ message: 'Hanya Super Admin yang dapat mengelola akun admin' }))
+
+r.get('/admins', requireSuper, wrap(async (req, res) => {
+  const admins = await prisma.user.findMany({ where: { role: 'admin' }, orderBy: { id: 'asc' }, include: { _count: { select: { exams: true, groupsOwned: true } } } })
+  const soal = new Map((await prisma.question.groupBy({ by: ['createdBy'], _count: { _all: true } })).map((x) => [x.createdBy, x._count._all]))
+  res.json(admins.map((a) => ({
+    id: a.id, username: a.username, nama: a.nama ?? '', status: a.status, superAdmin: a.superAdmin, createdAt: a.createdAt, diriSendiri: a.id === req.user.id,
+    jumlahUjian: a._count.exams, jumlahGrup: a._count.groupsOwned, jumlahSoal: soal.get(a.id) ?? 0,
+  })))
+}))
+
+r.post('/admins', requireSuper, wrap(async (req, res) => {
+  const b = req.body ?? {}
+  const username = String(b.username ?? '').trim()
+  const nama = String(b.nama ?? '').trim().slice(0, 100)
+  if (!nama) return res.status(400).json({ message: 'Nama wajib diisi' })
+  if (!USERNAME_RE.test(username)) return res.status(400).json({ message: 'Username 3–30 karakter: huruf, angka, titik, strip, underscore' })
+  if (await prisma.user.findUnique({ where: { username } })) return res.status(409).json({ message: 'Username sudah dipakai' })
+  if (b.password && String(b.password).length < 8) return res.status(400).json({ message: 'Password minimal 8 karakter' })
+  const password = b.password ? String(b.password) : randomPassword(10)
+  await prisma.user.create({ data: { username, nama, role: 'admin', passwordHash: await bcrypt.hash(password, 10), mustChangePassword: true } })
+  await audit(req.user.id, 'tambah_admin', username)
+  res.status(201).json({ username, nama, password })
+}))
+
+r.put('/admins/:id', requireSuper, wrap(async (req, res) => {
+  const id = +req.params.id
+  const admin = await prisma.user.findFirst({ where: { id, role: 'admin' } })
+  if (!admin) return res.status(404).json({ message: 'Admin tidak ditemukan' })
+  const b = req.body ?? {}
+  const data = {}
+  if ('nama' in b) {
+    data.nama = String(b.nama ?? '').trim().slice(0, 100)
+    if (!data.nama) return res.status(400).json({ message: 'Nama wajib diisi' })
+  }
+  if ('status' in b) {
+    if (id === req.user.id) return res.status(400).json({ message: 'Anda tidak dapat menonaktifkan akun sendiri' })
+    data.status = b.status === 'nonaktif' ? 'nonaktif' : 'aktif'
+  }
+  await prisma.user.update({ where: { id }, data })
+  await audit(req.user.id, 'ubah_admin', admin.username + (data.status ? ': ' + data.status : ''))
+  res.json({ ok: true })
+}))
+
+r.post('/admins/:id/reset-password', requireSuper, wrap(async (req, res) => {
+  const id = +req.params.id
+  const admin = await prisma.user.findFirst({ where: { id, role: 'admin' } })
+  if (!admin) return res.status(404).json({ message: 'Admin tidak ditemukan' })
+  const manual = req.body?.password ? String(req.body.password) : ''
+  if (manual && manual.length < 8) return res.status(400).json({ message: 'Password minimal 8 karakter' })
+  const password = manual || randomPassword(10)
+  await prisma.user.update({ where: { id }, data: { passwordHash: await bcrypt.hash(password, 10), mustChangePassword: true } })
+  await audit(req.user.id, 'reset_password_admin', admin.username)
+  res.json({ username: admin.username, password })
 }))
 
 export default r

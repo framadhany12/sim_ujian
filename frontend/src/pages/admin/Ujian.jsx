@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Plus, Clock, FileQuestion, Users, KeyRound, Pencil, Trash2, Activity } from 'lucide-react'
 import { api } from '../../api.js'
+import { useAuth } from '../../auth.jsx'
 import { Button, Input, Textarea, Card, Badge, Modal, ErrorText } from '../../components/ui.jsx'
 import { confirmDialog } from '../../components/Confirm.jsx'
 
@@ -17,6 +18,7 @@ function Switch({ checked, onChange, label }) {
 }
 
 export default function Ujian() {
+  const { user } = useAuth()
   const [list, setList] = useState(null)
   const [groups, setGroups] = useState([])
   const [form, setForm] = useState(null)
@@ -59,6 +61,7 @@ export default function Ujian() {
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h3 className="text-lg font-bold text-blue-950 leading-snug">{e.judul}</h3>
+                {user?.superAdmin && e.pembuat && <p className="text-xs text-slate-500">Dibuat oleh {e.pembuat}</p>}
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
                   {e.tokenAktif ? <Badge color="green">token aktif</Badge> : <Badge>belum dibuka</Badge>}
                   {e.acakSoal && <Badge color="blue">soal diacak</Badge>}
@@ -110,12 +113,17 @@ export default function Ujian() {
               <p className="text-sm text-slate-600 mb-1.5">Dilaksanakan di grup</p>
               {groups.length === 0
                 ? <p className="text-sm text-amber-700 bg-amber-50 rounded-xl p-3">Belum ada grup. Buat grup dulu di menu <b>Kelola Grup</b>.</p>
-                : <div className="flex flex-wrap gap-2">
-                    {groups.map((g) => {
-                      const on = form.groupIds.includes(g.id)
-                      return <button type="button" key={g.id} onClick={() => toggleGroup(g.id)} className={`px-3 py-1.5 rounded-full text-sm font-semibold border ${on ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'}`}>{on ? '✓ ' : ''}{g.nama} <span className="opacity-60 text-xs">({g.jumlahPeserta})</span></button>
-                    })}
-                  </div>}
+                : [['Grup saya', groups.filter((g) => g.milikSaya)], ['Grup admin lain', groups.filter((g) => !g.milikSaya)]].filter(([, gs]) => gs.length).map(([label, gs]) => (
+                    <div key={label} className="mb-2">
+                      <p className="text-[11px] uppercase tracking-wider text-slate-400 mb-1">{label}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {gs.map((g) => {
+                          const on = form.groupIds.includes(g.id)
+                          return <button type="button" key={g.id} onClick={() => toggleGroup(g.id)} title={g.milikSaya ? '' : `Dibuat oleh ${g.pemilik}`} className={`px-3 py-1.5 rounded-full text-sm font-semibold border ${on ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-slate-600 border-slate-300 hover:border-blue-400'}`}>{on ? '✓ ' : ''}{g.nama} <span className="opacity-60 text-xs">({g.jumlahPeserta}{g.milikSaya ? '' : ` · ${g.pemilik}`})</span></button>
+                        })}
+                      </div>
+                    </div>
+                  ))}
             </div>
 
             <div className="sm:col-span-2 grid sm:grid-cols-3 gap-3 text-sm">

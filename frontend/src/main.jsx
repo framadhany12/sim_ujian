@@ -21,6 +21,7 @@ import SusunSoal from './pages/admin/SusunSoal.jsx'
 import Token from './pages/admin/Token.jsx'
 import Monitor from './pages/admin/Monitor.jsx'
 import Nilai from './pages/admin/Nilai.jsx'
+import Admins from './pages/admin/Admins.jsx'
 
 
 createRoot(document.getElementById('root')).render(
@@ -46,6 +47,7 @@ createRoot(document.getElementById('root')).render(
             <Route path="ujian/:id/soal" element={<SusunSoal />} />
             <Route path="soal" element={<Soal />} />
             <Route path="grup" element={<Grup />} />
+            <Route path="admin" element={<Admins />} />
             <Route path="token" element={<Token />} />
             <Route path="monitor" element={<Monitor />} />
             <Route path="nilai" element={<Nilai />} />

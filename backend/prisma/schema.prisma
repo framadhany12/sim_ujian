@@ -40,6 +40,8 @@ model User {
   username           String       @unique
   passwordHash       String       @map("password_hash")
   role               Role
+  nama               String?      @db.VarChar(100)
+  superAdmin         Boolean      @default(false) @map("super_admin")
   mustChangePassword Boolean      @default(true) @map("must_change_password")
   status             UserStatus   @default(aktif)
   createdAt          DateTime     @default(now()) @map("created_at")
@@ -47,6 +49,8 @@ model User {
   exams              Exam[]
   attempts           ExamAttempt[]
   graded             Answer[]
+  memberships        GroupMember[]
+  groupsOwned        Group[]      @relation("GroupOwner")
 
   @@map("users")
 }
@@ -54,13 +58,12 @@ model User {
 model PesertaProfile {
   id          Int     @id @default(autoincrement())
   userId      Int     @unique @map("user_id")
-  groupId     Int?    @map("group_id")
+  createdBy   Int?    @map("created_by")
   namaLengkap String  @map("nama_lengkap")
   email       String?
   noHp        String? @map("no_hp")
   asalSekolah String? @map("asal_sekolah")
   user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  group       Group?  @relation(fields: [groupId], references: [id], onDelete: SetNull)
 
   @@map("peserta_profile")
 }
@@ -94,6 +97,7 @@ model Question {
   acakOpsi      Boolean      @default(false) @map("acak_opsi")
   pembahasan    String?      @db.Text
   kategori      String?      @db.VarChar(80)
+  createdBy     Int?         @map("created_by")
   createdAt     DateTime     @default(now()) @map("created_at")
   options       Option[]
   answers       Answer[]
@@ -164,12 +168,26 @@ model ActivityLog {
 
 model Group {
   id       Int              @id @default(autoincrement())
-  nama     String           @unique
-  createdAt DateTime       @default(now()) @map("created_at")
-  profiles PesertaProfile[]
-  exams    ExamGroup[]
+  nama      String        @unique
+  createdBy Int?          @map("created_by")
+  createdAt DateTime      @default(now()) @map("created_at")
+  owner     User?         @relation("GroupOwner", fields: [createdBy], references: [id], onDelete: SetNull)
+  members   GroupMember[]
+  exams     ExamGroup[]
 
   @@map("groups")
+}
+
+// Keanggotaan peserta di grup/kelas; satu peserta boleh di banyak grup
+model GroupMember {
+  groupId Int   @map("group_id")
+  userId  Int   @map("user_id")
+  group   Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user    User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+  @@index([userId])
+  @@map("group_members")
 }
 
 model ExamGroup {
@@ -221,8 +239,11 @@ model AttemptQuestion {
 
 model QuestionCategory {
   id        Int      @id @default(autoincrement())
-  nama      String   @unique @db.VarChar(80)
+  nama      String   @db.VarChar(80)
+  createdBy Int?     @map("created_by")
   createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([nama, createdBy])
 
   @@map("question_categories")
 }

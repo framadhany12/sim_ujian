@@ -1,6 +1,6 @@
 # Ujian Online — Politeknik TEDC
 
-Sistem ujian seleksi calon mahasiswa. Dua peran: **Admin** dan **Calon Mahasiswa** (peserta tidak mendaftar sendiri; akun dibuat Admin).
+Sistem ujian seleksi calon mahasiswa. Dua peran: **Admin** dan **Calon Mahasiswa** (peserta tidak mendaftar sendiri; akun dibuat Admin). Admin bisa lebih dari satu (mis. per dosen); **Super Admin** (`users.super_admin`) membuat akun admin lain lewat menu **Kelola Admin** dan melihat semua data.
 PRD lengkap: `sistem-ujian-online-PRD.md`.
 
 **Stack:** React 19 + Vite + Tailwind v4 (frontend) · Node.js + Express + Prisma 6 (backend) · MySQL/MariaDB (XAMPP) · Socket.IO (pemantauan) · JWT + bcrypt.
@@ -42,7 +42,9 @@ frontend/public/                      logo.png (wordmark), favicon.png
 
 ## Model data & aturan penting
 
-- **Grup** (`groups`): dibuat dinamis (mis. `kip2026`). Peserta punya **satu** grup. Ujian dipilihkan **grup pelaksana** (`exam_groups`); peserta hanya melihat ujian untuk grupnya. Ujian tanpa grup tidak tampil ke siapa pun.
+- **Kepemilikan per admin** (`created_by`): ujian (beserta token, pantau, nilai), bank soal, dan kategori soal hanya terlihat oleh admin pembuatnya; Super Admin melihat semua. Di backend dijaga oleh `own(req)` dan guard `r.use('/exams/:id' | '/questions/:qid' | '/attempts/:id')` di `routes/admin.js`.
+- **Grup / kelas** (`groups`, pemilik `created_by`): semua admin dapat melihat dan memakai grup mana pun sebagai grup pelaksana ujian, tetapi hanya pembuatnya (atau Super Admin) yang dapat mengganti nama, menghapus, dan mengubah anggota. Nama grup unik global.
+- **Peserta** di banyak grup (`group_members`). Satu mahasiswa = satu akun yang dipakai bersama semua dosen; impor dengan username yang sudah terdaftar memasukkan mahasiswa itu ke grup (tidak membuat akun dobel). Akun hanya dapat dihapus pembuatnya (`peserta_profile.created_by`) atau Super Admin. Ujian dipilihkan **grup pelaksana** (`exam_groups`); peserta melihat ujian untuk salah satu grupnya. Ujian tanpa grup tidak tampil ke siapa pun.
 - **Ujian Tersedia** (`exams`): judul, petunjuk, durasi, nilai kelulusan, acak soal, tampilkan hasil, **aktif/nonaktif**. Tidak ada jadwal/token di sini.
 - **Token Ujian** (`exam_tokens`): dibuat otomatis (6 karakter) untuk satu ujian dengan masa berlaku 30 menit / 1 jam / 4 jam / 12 jam / 1 hari. Token baru mencabut token lama ujian yang sama. Token hanya untuk **masuk**; peserta yang sudah mulai tetap menyelesaikan ujiannya. Syarat membuat token: ujian aktif, punya soal, punya grup.
 - **Bank Soal** (`questions`): umum, bukan milik ujian; punya `kategori` dan bobot bawaan. **Ujian memilih soal** lewat `exam_questions` (urutan + bobot khusus ujian, `NULL` = pakai bobot bawaan). Soal yang pernah dikerjakan tidak dapat dihapus.
@@ -57,7 +59,7 @@ Template Excel (dropdown, lembar Petunjuk) tersedia di Peserta dan Bank Soal. Im
 
 ## Menu Admin (sidebar)
 
-Dashboard · Ujian Tersedia · Token Ujian · Pantau Ujian · Bank Soal · Kelola Grup · Peserta · Nilai & Laporan.
+Dashboard · Ujian Tersedia · Token Ujian · Pantau Ujian · Bank Soal · Kelola Grup · Peserta · Nilai & Laporan · Kelola Admin (hanya Super Admin).
 Alur: buat grup → tambah/impor peserta (pilih grup) → isi Bank Soal → buat ujian (pilih grup) → **Atur soal** (pilih dari bank, atur bobot) → **Token Ujian** (generate) → pantau → nilai esai → rekap/unduh laporan.
 
 ## Catatan pengembangan
