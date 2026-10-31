@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $vps = 'root@203.194.115.166'
 $key = Join-Path $env:USERPROFILE '.ssh\ujian_vps'
-$site = 'https://ujiantedc.duckdns.org'
+$site = 'https://akuntansi.ujiantedc.cloud'
 
 Write-Host '== Update Ujian Online ke VPS ==' -ForegroundColor Cyan
 try {
