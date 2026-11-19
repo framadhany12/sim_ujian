@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { Bell, LogOut, KeyRound, Menu, X } from 'lucide-react'
 import { useAuth } from '../auth.jsx'
 import Logo from './Logo.jsx'
+import Footer from './Footer.jsx'
 
 /**
  * Kerangka dashboard: sidebar bergrup + topbar.
@@ -69,6 +70,7 @@ export default function AppShell({ groups, subtitle, eyebrow, title, bell, helpC
           </div>
         </header>
         <main className="flex-1 p-4 lg:p-8 w-full max-w-[1400px] mx-auto"><Outlet /></main>
+        <Footer className="border-t border-line bg-white px-4 lg:px-8 py-4" />
       </div>
     </div>
   )

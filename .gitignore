@@ -6,3 +6,6 @@ dist/
 .ngodingpakeai/pending.json
 .ngodingpakeai/summaries.json
 backend/uploads/
+*.docx
+*.pdf
+

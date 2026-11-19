@@ -1,5 +1,6 @@
 import { ShieldCheck, Timer, Laptop, Award } from 'lucide-react'
 import Logo, { INSTITUSI } from './Logo.jsx'
+import Footer from './Footer.jsx'
 
 const points = [
   [Laptop, 'Ujian dari mana saja', 'Cukup perangkat dan koneksi internet.'],
@@ -27,10 +28,13 @@ export default function AuthShell({ children }) {
             ))}
           </ul>
         </div>
-        <p className="text-xs text-blue-300 hidden lg:block">© {new Date().getFullYear()} {INSTITUSI}. Hak cipta dilindungi.</p>
+        <Footer onDark className="hidden lg:block" />
       </section>
-      <section className="grid place-items-center p-6 lg:p-12 bg-slate-50">
-        <div className="w-full max-w-sm">{children}</div>
+      <section className="flex flex-col p-6 lg:p-12 bg-slate-50">
+        <div className="flex-1 grid place-items-center">
+          <div className="w-full max-w-sm">{children}</div>
+        </div>
+        <Footer className="lg:hidden mt-8" />
       </section>
     </main>
   )
