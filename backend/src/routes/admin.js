@@ -845,6 +845,8 @@ r.post('/questions/import/save', wrap(async (req, res) => {
 
 /* ───────────── Pemantauan ───────────── */
 
+// Filter kelas opsional (?grup=ID): hanya peserta yang menjadi anggota grup itu
+const grupFilter = (q) => (/^\d+$/.test(String(q?.grup ?? '')) ? { memberships: { some: { groupId: +q.grup } } } : {})
 const examGroupIds = async (examId) => new Set((await prisma.examGroup.findMany({ where: { examId }, select: { groupId: true } })).map((g) => g.groupId))
 // Nama grup peserta yang menjadi pelaksana ujian (bila tidak ada, semua grupnya)
 const grupLabel = (u, examGroups) => {
@@ -873,6 +875,7 @@ r.get('/exams/:id/monitor', wrap(async (req, res) => {
     const s = a ? shots.get(a.id) : []
     return {
       userId: u.id, attemptId: a?.id ?? null, nama: u.profile?.namaLengkap ?? u.username, username: u.username, grup: grupLabel(u, examGroups) || null,
+      grupIds: u.memberships.map((m) => m.group.id),
       status: a?.status ?? 'belum_mulai', waktuMulai: a?.waktuMulai ?? null, lastSeen: a?.lastSeen ?? null,
       keluarHalaman: keluar, terputus: !!terputus,
       kameraTerakhir: s[0] ?? null, jumlahFoto: s.length,
@@ -907,7 +910,7 @@ r.post('/exams/:id/monitor/:userId/reset', wrap(async (req, res) => {
 
 r.get('/exams/:id/essays', wrap(async (req, res) => {
   const answers = await prisma.answer.findMany({
-    where: { question: { tipe: 'esai' }, attempt: { examId: +req.params.id, status: 'selesai' } },
+    where: { question: { tipe: 'esai' }, attempt: { examId: +req.params.id, status: 'selesai', user: grupFilter(req.query) } },
     include: { question: true, attempt: { include: { user: { include: { profile: true } } } } },
     orderBy: [{ questionId: 'asc' }, { id: 'asc' }],
   })
@@ -936,13 +939,13 @@ r.put('/answers/:id/nilai', wrap(async (req, res) => {
 /* ───────────── Rekap & laporan ───────────── */
 
 // from/to: batas waktu mulai pengerjaan (ISO, dihitung di zona waktu browser admin)
-async function rekap(examId, { from, to } = {}) {
+async function rekap(examId, { from, to, grup } = {}) {
   const exam = await prisma.exam.findUnique({ where: { id: examId } })
   const range = {}
   if (from && !isNaN(Date.parse(from))) range.gte = new Date(from)
   if (to && !isNaN(Date.parse(to))) range.lt = new Date(to)
   const attempts = await prisma.examAttempt.findMany({
-    where: { examId, ...(Object.keys(range).length && { waktuMulai: range }) }, include: { user: { include: { profile: true, memberships: { include: { group: true } } } } }, orderBy: { skorTotal: 'desc' },
+    where: { examId, ...(Object.keys(range).length && { waktuMulai: range }), user: grupFilter({ grup }) }, include: { user: { include: { profile: true, memberships: { include: { group: true } } } } }, orderBy: { skorTotal: 'desc' },
   })
   const examGroups = await examGroupIds(examId)
   return { exam, rows: attempts.map((a) => ({

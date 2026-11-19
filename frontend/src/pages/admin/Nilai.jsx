@@ -16,7 +16,7 @@ const rangeQuery = (dari, sampai) => {
 const KL = { lulus: ['green', 'Lulus'], tidak_lulus: ['red', 'Tidak lulus'], belum: ['slate', 'Belum dinilai'] }
 
 export default function Nilai() {
-  const { examId, picker, loaded } = useExamPicker()
+  const { examId, grupId, picker, loaded } = useExamPicker()
   const [rekap, setRekap] = useState(null)
   const [essays, setEssays] = useState([])
   const [draft, setDraft] = useState({})
@@ -24,13 +24,15 @@ export default function Nilai() {
   const [sampai, setSampai] = useState(today)
   const [rekapError, setRekapError] = useState('')
   const qs = rangeQuery(dari, sampai)
+  const grupQs = grupId ? `grup=${grupId}` : ''
+  const rekapQs = [qs, grupQs].filter(Boolean).join('&')
 
   const load = useCallback(() => {
     if (!examId) return
     setRekap(null); setRekapError('')
-    api(`/admin/exams/${examId}/rekap?${qs}`).then(setRekap).catch((e) => setRekapError(e.message))
-    api(`/admin/exams/${examId}/essays`).then(setEssays)
-  }, [examId, qs])
+    api(`/admin/exams/${examId}/rekap?${rekapQs}`).then(setRekap).catch((e) => setRekapError(e.message))
+    api(`/admin/exams/${examId}/essays?${grupQs}`).then(setEssays)
+  }, [examId, rekapQs, grupQs])
   useEffect(() => { load() }, [load])
 
   const grade = async (a) => {
@@ -45,7 +47,7 @@ export default function Nilai() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <h1 className="text-xl font-semibold">Penilaian & Rekap Nilai</h1>
-        <Button variant="ghost" onClick={() => download(`/admin/exams/${examId}/report?format=xlsx&${qs}`, 'laporan-hasil-ujian.xlsx')}><Download size={16} /> Unduh Laporan</Button>
+        <Button variant="ghost" onClick={() => download(`/admin/exams/${examId}/report?format=xlsx&${rekapQs}`, 'laporan-hasil-ujian.xlsx')}><Download size={16} /> Unduh Laporan</Button>
       </div>
       {picker}
 
@@ -79,7 +81,7 @@ export default function Nilai() {
           <Button variant="ghost" onClick={() => { setDari(today()); setSampai(today()) }}>Hari ini</Button>
           <Button variant="ghost" onClick={() => { setDari(''); setSampai('') }}>Semua tanggal</Button>
         </div>
-        <p className="text-xs text-slate-500">{dari || sampai ? 'Hanya peserta yang mulai mengerjakan pada rentang tanggal ini. Unduh Laporan memakai filter yang sama.' : 'Menampilkan semua tanggal.'}</p>
+        <p className="text-xs text-slate-500">{dari || sampai ? 'Hanya peserta yang mulai mengerjakan pada rentang tanggal ini. ' : 'Menampilkan semua tanggal. '}{grupId ? 'Hanya anggota kelas terpilih. ' : ''}Unduh Laporan memakai filter yang sama.</p>
         <Card className="overflow-x-auto p-0">
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-left"><tr>{['#', 'Nama', 'Grup', 'Status', 'Skor', 'Kelulusan', 'Selesai'].map((h) => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}</tr></thead>

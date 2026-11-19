@@ -50,9 +50,33 @@ function CamGallery({ row, onClose }) {
 
 const ST = { belum_mulai: ['slate', 'Belum mulai'], sedang_mengerjakan: ['amber', 'Sedang mengerjakan'], selesai: ['green', 'Selesai'] }
 
+// Satu sumber untuk tabel (desktop) dan kartu (HP)
+function CamCell({ r, onOpen }) {
+  return r.kameraTerakhir
+    ? <button onClick={() => onOpen(r)} title="Lihat semua foto kamera" className="block rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
+        <CamPhoto attemptId={r.attemptId} ts={r.kameraTerakhir} className="w-20 h-15 rounded-lg" />
+        <span className="block text-[11px] text-slate-500 mt-0.5">{jam(r.kameraTerakhir)} · {r.jumlahFoto} foto</span>
+      </button>
+    : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><CameraOff size={14} /> belum ada foto</span>
+}
+
+function Warnings({ r }) {
+  const fotoHilang = r.status === 'sedang_mengerjakan' && !r.terputus && r.waktuMulai && Date.now() - new Date(r.waktuMulai).getTime() > 150000 && (!r.kameraTerakhir || Date.now() - r.kameraTerakhir > 150000)
+  if (!r.terputus && !(r.keluarHalaman > 0) && !(r.kameraMati > 0) && !fotoHilang) return null
+  return (
+    <div className="flex flex-wrap gap-1">
+      {r.terputus && <Badge color="red">koneksi terputus</Badge>}
+      {r.keluarHalaman > 0 && <Badge color="amber">keluar halaman ×{r.keluarHalaman}</Badge>}
+      {r.kameraMati > 0 && <Badge color="red">kamera mati ×{r.kameraMati}</Badge>}
+      {fotoHilang && <Badge color="red">foto kamera tidak masuk</Badge>}
+    </div>
+  )
+}
+
+
 export default function Monitor() {
-  const { examId, picker, loaded } = useExamPicker()
-  const [rows, setRows] = useState([])
+  const { examId, grupId, picker, loaded } = useExamPicker()
+  const [allRows, setRows] = useState([])
   const [gallery, setGallery] = useState(null)
 
   const load = useCallback(() => examId && api(`/admin/exams/${examId}/monitor`).then(setRows), [examId])
@@ -71,49 +95,65 @@ export default function Monitor() {
   }
 
   if (!loaded) return <Card className="text-slate-500">Belum ada ujian.</Card>
+  const rows = grupId ? allRows.filter((r) => r.grupIds.includes(grupId)) : allRows
   const count = (s) => rows.filter((r) => r.status === s).length
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Pantau Peserta Langsung</h1>
       {picker}
-      <div className="grid grid-cols-3 gap-3 text-center">
-        {Object.entries(ST).map(([k, [, label]]) => <Card key={k}><p className="text-2xl font-bold">{count(k)}</p><p className="text-sm text-slate-500">{label}</p></Card>)}
+      <div className="grid grid-cols-3 gap-2 sm:gap-3 text-center">
+        {Object.entries(ST).map(([k, [, label]]) => <Card key={k} className="!p-3 sm:!p-5"><p className="text-2xl font-bold">{count(k)}</p><p className="text-xs sm:text-sm text-slate-500">{label}</p></Card>)}
       </div>
-      <Card className="overflow-x-auto p-0">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left"><tr>{['Kamera', 'Peserta', 'Status', 'Mulai', 'Terakhir aktif', 'Peringatan'].map((h) => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}</tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.userId} className="border-t">
-                <td className="px-4 py-2">
-                  {r.kameraTerakhir
-                    ? <button onClick={() => setGallery(r)} title="Lihat semua foto kamera" className="block rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
-                        <CamPhoto attemptId={r.attemptId} ts={r.kameraTerakhir} className="w-20 h-15 rounded-lg" />
-                        <span className="block text-[11px] text-slate-500 mt-0.5">{jam(r.kameraTerakhir)} · {r.jumlahFoto} foto</span>
-                      </button>
-                    : <span className="inline-flex items-center gap-1 text-xs text-slate-400"><CameraOff size={14} /> belum ada foto</span>}
-                </td>
-                <td className="px-4 py-2">{r.nama}<div className="text-xs text-slate-500 font-mono">{r.username}</div></td>
-                <td className="px-4 py-2">
-                  <div className="flex items-center gap-2">
-                    <Badge color={ST[r.status][0]}>{ST[r.status][1]}</Badge>
-                    {r.status !== 'belum_mulai' && <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => reset(r)}>Reset</Button>}
-                  </div>
-                </td>
-                <td className="px-4 py-2">{fmtDate(r.waktuMulai)}</td>
-                <td className="px-4 py-2">{r.lastSeen ? new Date(r.lastSeen).toLocaleTimeString('id-ID') : '-'}</td>
-                <td className="px-4 py-2 space-x-1">
-                  {r.terputus && <Badge color="red">koneksi terputus</Badge>}
-                  {r.keluarHalaman > 0 && <Badge color="amber">keluar halaman ×{r.keluarHalaman}</Badge>}
-                  {r.kameraMati > 0 && <Badge color="red">kamera mati ×{r.kameraMati}</Badge>}
-                  {r.status === 'sedang_mengerjakan' && !r.terputus && r.waktuMulai && Date.now() - new Date(r.waktuMulai).getTime() > 150000 && (!r.kameraTerakhir || Date.now() - r.kameraTerakhir > 150000) && <Badge color="red">foto kamera tidak masuk</Badge>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+
+      {rows.length === 0 && <Card className="text-center text-sm text-slate-500">{grupId ? 'Tidak ada peserta di kelas ini.' : 'Belum ada peserta.'}</Card>}
+
+      <ul className="space-y-3 xl:hidden">
+        {rows.map((r) => (
+          <li key={r.userId} className="bg-white border border-line rounded-2xl p-3 flex gap-3">
+            <div className="shrink-0"><CamCell r={r} onOpen={setGallery} /></div>
+            <div className="min-w-0 flex-1 space-y-2">
+              <div>
+                <p className="text-sm font-medium break-words">{r.nama}</p>
+                <p className="text-xs text-slate-500 font-mono break-all">{r.username}</p>
+                {r.grup && <p className="text-xs text-slate-500 mt-0.5">{r.grup}</p>}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge color={ST[r.status][0]}>{ST[r.status][1]}</Badge>
+                {r.status !== 'belum_mulai' && <Button variant="ghost" className="min-h-11 text-xs" onClick={() => reset(r)}>Reset</Button>}
+              </div>
+              {r.waktuMulai && <p className="text-xs text-slate-500">Mulai {fmtDate(r.waktuMulai)}{r.lastSeen ? ` · aktif ${new Date(r.lastSeen).toLocaleTimeString('id-ID')}` : ''}</p>}
+              <Warnings r={r} />
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      {rows.length > 0 && (
+        <Card className="hidden xl:block overflow-x-auto p-0">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-left"><tr>{['Kamera', 'Peserta', 'Kelas', 'Status', 'Mulai', 'Terakhir aktif', 'Peringatan'].map((h) => <th key={h} className="px-4 py-2 font-medium">{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.userId} className="border-t">
+                  <td className="px-4 py-2 whitespace-nowrap"><CamCell r={r} onOpen={setGallery} /></td>
+                  <td className="px-4 py-2">{r.nama}<div className="text-xs text-slate-500 font-mono">{r.username}</div></td>
+                  <td className="px-4 py-2">{r.grup ?? '-'}</td>
+                  <td className="px-4 py-2">
+                    <div className="flex items-center gap-2">
+                      <Badge color={ST[r.status][0]}>{ST[r.status][1]}</Badge>
+                      {r.status !== 'belum_mulai' && <Button variant="ghost" className="!px-2 !py-1 text-xs" onClick={() => reset(r)}>Reset</Button>}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2 whitespace-nowrap">{fmtDate(r.waktuMulai)}</td>
+                  <td className="px-4 py-2 whitespace-nowrap">{r.lastSeen ? new Date(r.lastSeen).toLocaleTimeString('id-ID') : '-'}</td>
+                  <td className="px-4 py-2"><Warnings r={r} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
       {gallery && <CamGallery row={gallery} onClose={() => setGallery(null)} />}
     </div>
   )

@@ -23,7 +23,7 @@ export default function ExamTimer({ endsAt, onExpire, paused = false }) {
   }, [endsAt, onExpire, paused])
 
   return (
-    <div className={`flex items-center gap-2 font-mono text-lg font-bold px-4 py-2 rounded-xl ${left <= 300 ? 'bg-red-100 text-red-700' : 'bg-page text-blue-950'}`}>
+    <div role="timer" className={`flex items-center gap-1.5 sm:gap-2 font-mono text-base sm:text-lg font-bold px-2.5 sm:px-4 py-2 rounded-xl ${left <= 300 ? 'bg-red-100 text-red-700' : 'bg-page text-blue-950'}`}>
       <Clock size={18} /> {format(left)}
     </div>
   )
